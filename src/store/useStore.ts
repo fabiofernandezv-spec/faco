@@ -9,6 +9,8 @@ interface Store {
   rundown: Rundown;
   media: MediaItem[];
 
+  setCurrentUser: (user: User) => void;
+
   addNote: (note: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updateNote: (id: string, changes: Partial<Note>) => void;
   deleteNote: (id: string) => void;
@@ -18,6 +20,8 @@ interface Store {
 
   updateRundownItem: (itemId: string, status: 'pendiente' | 'al_aire' | 'emitido') => void;
   reorderRundown: (items: Rundown['items']) => void;
+  addRundownItem: (note: Note) => void;
+  removeRundownItem: (itemId: string) => void;
 
   addMedia: (item: Omit<MediaItem, 'id'>) => void;
 }
@@ -37,6 +41,8 @@ export const useStore = create<Store>()(
       notes: MOCK_NOTES,
       rundown: MOCK_RUNDOWN,
       media: MOCK_MEDIA,
+
+      setCurrentUser: (user) => set({ currentUser: user }),
 
       addNote: (note) =>
         set((s) => ({
@@ -108,6 +114,31 @@ export const useStore = create<Store>()(
 
       reorderRundown: (items) =>
         set((s) => ({ rundown: { ...s.rundown, items } })),
+
+      addRundownItem: (note) =>
+        set((s) => {
+          const items = s.rundown.items;
+          const newItem = {
+            id: genId(),
+            order: items.length + 1,
+            type: 'nota' as const,
+            noteId: note.id,
+            noteTitle: note.title,
+            durationSecs: note.durationSecs ?? 60,
+            status: 'pendiente' as const,
+          };
+          return { rundown: { ...s.rundown, items: [...items, newItem] } };
+        }),
+
+      removeRundownItem: (itemId) =>
+        set((s) => ({
+          rundown: {
+            ...s.rundown,
+            items: s.rundown.items
+              .filter((i) => i.id !== itemId)
+              .map((item, idx) => ({ ...item, order: idx + 1 })),
+          },
+        })),
 
       addMedia: (item) =>
         set((s) => ({

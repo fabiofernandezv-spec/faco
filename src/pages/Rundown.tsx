@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Tv2, Play, CheckCircle, Clock, Pause, Clapperboard, ChevronUp, ChevronDown } from 'lucide-react';
+import { Tv2, Play, CheckCircle, Clock, Pause, Clapperboard, ChevronUp, ChevronDown, Plus, X, Trash2 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { RundownItem } from '../types';
 
@@ -26,6 +26,7 @@ function RundownRow({
   onStatusChange,
   onMoveUp,
   onMoveDown,
+  onRemove,
   isFirst,
   isLast,
 }: {
@@ -33,6 +34,7 @@ function RundownRow({
   onStatusChange: (status: RundownItem['status']) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  onRemove: () => void;
   isFirst: boolean;
   isLast: boolean;
 }) {
@@ -75,23 +77,37 @@ function RundownRow({
         <Icon className={`h-4 w-4 mx-auto ${sc.color} ${item.status === 'al_aire' ? 'animate-pulse' : ''}`} />
       </td>
       <td className="px-4 py-3">
-        <select
-          value={item.status}
-          onChange={(e) => onStatusChange(e.target.value as RundownItem['status'])}
-          className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-500"
-        >
-          <option value="pendiente">Pendiente</option>
-          <option value="al_aire">Al aire</option>
-          <option value="emitido">Emitido</option>
-        </select>
+        <div className="flex items-center gap-1">
+          <select
+            value={item.status}
+            onChange={(e) => onStatusChange(e.target.value as RundownItem['status'])}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            <option value="pendiente">Pendiente</option>
+            <option value="al_aire">Al aire</option>
+            <option value="emitido">Emitido</option>
+          </select>
+          <button
+            onClick={onRemove}
+            className="p-1 text-gray-300 hover:text-red-400 transition-colors"
+            title="Quitar del rundown"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </td>
     </tr>
   );
 }
 
 export function Rundown() {
-  const { rundown, updateRundownItem, reorderRundown } = useStore();
-  const [showLegend, setShowLegend] = useState(false);
+  const { notes, rundown, updateRundownItem, reorderRundown, addRundownItem, removeRundownItem } = useStore();
+  const [showLegend,  setShowLegend]  = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  const availableNotes = notes.filter(
+    (n) => n.forTv && n.status === 'aprobada' && !rundown.items.some((i) => i.noteId === n.id)
+  );
 
   const emitidos   = rundown.items.filter((i) => i.status === 'emitido').length;
   const totalSecs  = rundown.items.reduce((a, i) => a + i.durationSecs, 0);
@@ -118,12 +134,63 @@ export function Rundown() {
           <p className="text-sm text-gray-500">{rundown.title}</p>
           <p className="text-xs text-gray-400 mt-0.5">{rundown.channel} · {rundown.date}</p>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-gray-400">Duración total</p>
-          <p className="text-2xl font-bold text-gray-900">{fmtSecs(totalSecs)}</p>
-          <p className="text-xs text-gray-400 mt-0.5">{emitidos}/{rundown.items.length} segmentos emitidos</p>
+        <div className="flex items-start gap-4">
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 bg-brand-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            Agregar nota
+          </button>
+          <div className="text-right">
+            <p className="text-xs text-gray-400">Duración total</p>
+            <p className="text-2xl font-bold text-gray-900">{fmtSecs(totalSecs)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{emitidos}/{rundown.items.length} segmentos emitidos</p>
+          </div>
         </div>
       </div>
+
+      {/* Add note modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Agregar nota al rundown</h3>
+              <button onClick={() => setShowAddModal(false)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 max-h-96 overflow-y-auto">
+              {availableNotes.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-8">
+                  No hay notas aprobadas disponibles para TV.<br />
+                  <span className="text-xs">Las notas deben estar aprobadas y marcadas "Para TV".</span>
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {availableNotes.map((note) => (
+                    <li key={note.id}>
+                      <button
+                        onClick={() => { addRundownItem(note); setShowAddModal(false); }}
+                        className="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-brand-300 hover:bg-brand-50 transition-colors group"
+                      >
+                        <p className="text-sm font-medium text-gray-900 group-hover:text-brand-700">{note.title}</p>
+                        <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">
+                          <span className="capitalize">{note.category}</span>
+                          <span>·</span>
+                          <span>{fmtSecs(note.durationSecs ?? 60)}</span>
+                          <span>·</span>
+                          <span>{note.authorName}</span>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Progress */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
@@ -180,6 +247,7 @@ export function Rundown() {
                 onStatusChange={(s) => updateRundownItem(item.id, s)}
                 onMoveUp={() => moveItem(idx, -1)}
                 onMoveDown={() => moveItem(idx, 1)}
+                onRemove={() => removeRundownItem(item.id)}
                 isFirst={idx === 0}
                 isLast={idx === rundown.items.length - 1}
               />

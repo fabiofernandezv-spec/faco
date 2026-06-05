@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Save, Send, Trash2, Tv2, Tag, X } from 'lucide-react';
+import { ArrowLeft, Save, Send, Trash2, Tv2, Tag, X, ListVideo, CheckCircle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { StatusBadge } from '../components/StatusBadge';
 import type { NoteCategory } from '../types';
@@ -19,7 +19,7 @@ const CATEGORIES: { value: NoteCategory; label: string }[] = [
 export function NoteEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { notes, currentUser, addNote, updateNote, deleteNote, submitForReview } = useStore();
+  const { notes, currentUser, rundown, addNote, updateNote, deleteNote, submitForReview, addRundownItem } = useStore();
 
   const isNew = id === 'nueva';
   const existing = isNew ? null : notes.find((n) => n.id === id);
@@ -40,6 +40,8 @@ export function NoteEditor() {
 
   const canEdit = isNew || existing?.status === 'borrador' || existing?.status === 'rechazada';
   const canSubmit = canEdit && (existing?.status === 'borrador' || existing?.status === 'rechazada' || isNew);
+  const inRundown = existing ? rundown.items.some((i) => i.noteId === existing.id) : false;
+  const canAddToRundown = !isNew && existing?.status === 'aprobada' && existing?.forTv && !inRundown;
 
   function handleSave() {
     if (isNew) {
@@ -145,6 +147,21 @@ export function NoteEditor() {
               <Send className="h-4 w-4" />
               Enviar a revisión
             </button>
+          )}
+          {canAddToRundown && existing && (
+            <button
+              onClick={() => addRundownItem(existing)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-tv-green rounded-lg hover:opacity-90 transition-colors"
+            >
+              <ListVideo className="h-4 w-4" />
+              Agregar al Rundown
+            </button>
+          )}
+          {inRundown && !isNew && (
+            <span className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-green-700 bg-green-50 rounded-lg border border-green-200">
+              <CheckCircle className="h-3.5 w-3.5" />
+              En el Rundown
+            </span>
           )}
         </div>
       </div>

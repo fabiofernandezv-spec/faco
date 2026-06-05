@@ -1,10 +1,12 @@
+import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, CheckSquare, Tv2,
-  Radio, ImageIcon, User, ChevronRight,
+  Radio, ImageIcon, ChevronRight, ChevronUp, Users,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useStore } from '../store/useStore';
+import { MOCK_USERS } from '../data/mockData';
 
 const NAV = [
   { to: '/',            label: 'Dashboard',      icon: LayoutDashboard },
@@ -22,12 +24,32 @@ const ROLE_LABELS: Record<string, string> = {
   presentador:'Presentador/a',
 };
 
+const ROLE_COLORS: Record<string, string> = {
+  redactor:    'bg-blue-500',
+  editor:      'bg-purple-500',
+  director:    'bg-brand-500',
+  presentador: 'bg-green-500',
+};
+
 export function Layout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
-  const currentUser = useStore((s) => s.currentUser);
+  const currentUser  = useStore((s) => s.currentUser);
+  const setCurrentUser = useStore((s) => s.setCurrentUser);
   const pendingCount = useStore((s) =>
     s.notes.filter((n) => n.status === 'en_revision').length
   );
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowUserMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
@@ -70,16 +92,49 @@ export function Layout({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        {/* User */}
-        <div className="border-t border-gray-200 px-4 py-4 flex items-center gap-3">
-          <div className="h-8 w-8 rounded-full bg-brand-500 flex items-center justify-center text-white text-sm font-bold">
-            {currentUser.name[0]}
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-gray-900">{currentUser.name}</p>
-            <p className="truncate text-xs text-gray-500">{ROLE_LABELS[currentUser.role]}</p>
-          </div>
-          <User className="h-4 w-4 text-gray-400 flex-shrink-0" />
+        {/* User switcher */}
+        <div ref={menuRef} className="relative border-t border-gray-200">
+          {showUserMenu && (
+            <div className="absolute bottom-full left-0 right-0 mb-1 mx-2 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-50">
+              <p className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100 flex items-center gap-1">
+                <Users className="h-3 w-3" /> Cambiar usuario
+              </p>
+              {MOCK_USERS.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => { setCurrentUser(u); setShowUserMenu(false); }}
+                  className={clsx(
+                    'w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left transition-colors hover:bg-gray-50',
+                    u.id === currentUser.id && 'bg-brand-50'
+                  )}
+                >
+                  <div className={`h-6 w-6 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${ROLE_COLORS[u.role]}`}>
+                    {u.name[0]}
+                  </div>
+                  <div className="min-w-0">
+                    <p className={clsx('text-sm font-medium truncate', u.id === currentUser.id ? 'text-brand-700' : 'text-gray-900')}>
+                      {u.name}
+                    </p>
+                    <p className="text-xs text-gray-400 truncate">{ROLE_LABELS[u.role]}</p>
+                  </div>
+                  {u.id === currentUser.id && <span className="ml-auto text-xs text-brand-500">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => setShowUserMenu(!showUserMenu)}
+            className="w-full px-4 py-4 flex items-center gap-3 hover:bg-gray-50 transition-colors"
+          >
+            <div className={`h-8 w-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${ROLE_COLORS[currentUser.role]}`}>
+              {currentUser.name[0]}
+            </div>
+            <div className="min-w-0 flex-1 text-left">
+              <p className="truncate text-sm font-medium text-gray-900">{currentUser.name}</p>
+              <p className="truncate text-xs text-gray-500">{ROLE_LABELS[currentUser.role]}</p>
+            </div>
+            <ChevronUp className={clsx('h-4 w-4 text-gray-400 flex-shrink-0 transition-transform', !showUserMenu && 'rotate-180')} />
+          </button>
         </div>
       </aside>
 
