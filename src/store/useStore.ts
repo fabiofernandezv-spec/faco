@@ -114,6 +114,6 @@ export const useStore = create<Store>()(
           media: [...s.media, { ...item, id: genId() }],
         })),
     }),
-    { name: 'faco-store' }
+    { name: 'mesa-central-store' }
   )
 );

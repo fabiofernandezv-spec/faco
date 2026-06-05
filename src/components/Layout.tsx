@@ -38,8 +38,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <div className="h-8 w-8 rounded-lg bg-brand-500 flex items-center justify-center">
             <Tv2 className="h-5 w-5 text-white" />
           </div>
-          <span className="font-bold text-lg tracking-tight text-gray-900">FACO</span>
-          <span className="text-xs text-gray-400 mt-0.5">Newsroom</span>
+          <span className="font-bold text-lg tracking-tight text-gray-900">Mesa Central</span>
+          <span className="text-xs text-gray-400 mt-0.5">somoseffe</span>
         </div>
 
         {/* Nav */}

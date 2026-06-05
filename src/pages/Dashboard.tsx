@@ -29,7 +29,7 @@ export function Dashboard() {
       <div className="flex items-start justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Bienvenido/a, {currentUser.name.split(' ')[0]}</h1>
-          <p className="text-gray-500 mt-1">Sistema de Redacción Digital y TV — FACO Newsroom</p>
+          <p className="text-gray-500 mt-1">Sistema de Redacción Digital y TV — somoseffe</p>
         </div>
         <Link
           to="/notas/nueva"
