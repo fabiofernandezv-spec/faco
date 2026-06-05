@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Save, Send, Trash2, Tv2, Tag, X, ListVideo, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Save, Send, Trash2, Tv2, Tag, X, ListVideo, CheckCircle, FileDown } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { StatusBadge } from '../components/StatusBadge';
+import { RichTextEditor, htmlToPlainText } from '../components/RichTextEditor';
 import type { NoteCategory } from '../types';
 
 const CATEGORIES: { value: NoteCategory; label: string }[] = [
@@ -16,12 +17,18 @@ const CATEGORIES: { value: NoteCategory; label: string }[] = [
   { value: 'entretenimiento',label: 'Entretenimiento' },
 ];
 
+const CAT_LABELS: Record<string, string> = {
+  nacional: 'Nacional', internacional: 'Internacional', economia: 'Economía',
+  deportes: 'Deportes', cultura: 'Cultura', tecnologia: 'Tecnología',
+  salud: 'Salud', entretenimiento: 'Entretenimiento',
+};
+
 export function NoteEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { notes, currentUser, rundown, addNote, updateNote, deleteNote, submitForReview, addRundownItem } = useStore();
 
-  const isNew = id === 'nueva';
+  const isNew    = id === 'nueva';
   const existing = isNew ? null : notes.find((n) => n.id === id);
 
   const [title,    setTitle]    = useState(existing?.title    ?? '');
@@ -38,53 +45,38 @@ export function NoteEditor() {
     if (!isNew && !existing) navigate('/notas');
   }, [isNew, existing, navigate]);
 
-  const canEdit = isNew || existing?.status === 'borrador' || existing?.status === 'rechazada';
+  const canEdit   = isNew || existing?.status === 'borrador' || existing?.status === 'rechazada';
   const canSubmit = canEdit && (existing?.status === 'borrador' || existing?.status === 'rechazada' || isNew);
   const inRundown = existing ? rundown.items.some((i) => i.noteId === existing.id) : false;
   const canAddToRundown = !isNew && existing?.status === 'aprobada' && existing?.forTv && !inRundown;
+  const bodyPlain = htmlToPlainText(body);
 
-  function handleSave() {
+  async function handleSave() {
     if (isNew) {
-      addNote({
-        title, lead, body, category, forTv,
-        durationSecs: duration,
-        status: 'borrador',
-        authorId: currentUser.id,
-        authorName: currentUser.name,
-        media: [],
-        tags,
-      });
+      await addNote({ title, lead, body, category, forTv, durationSecs: duration, status: 'borrador', authorId: currentUser.id, authorName: currentUser.name, media: [], tags });
       navigate('/notas');
     } else if (existing) {
-      updateNote(existing.id, { title, lead, body, category, forTv, durationSecs: duration, tags });
+      await updateNote(existing.id, { title, lead, body, category, forTv, durationSecs: duration, tags });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     }
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (isNew) {
-      addNote({
-        title, lead, body, category, forTv,
-        durationSecs: duration,
-        status: 'en_revision',
-        authorId: currentUser.id,
-        authorName: currentUser.name,
-        media: [],
-        tags,
-      });
+      await addNote({ title, lead, body, category, forTv, durationSecs: duration, status: 'en_revision', authorId: currentUser.id, authorName: currentUser.name, media: [], tags });
       navigate('/notas');
     } else if (existing) {
-      updateNote(existing.id, { title, lead, body, category, forTv, durationSecs: duration, tags });
-      submitForReview(existing.id);
+      await updateNote(existing.id, { title, lead, body, category, forTv, durationSecs: duration, tags });
+      await submitForReview(existing.id);
       navigate('/notas');
     }
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!existing) return;
     if (window.confirm('¿Eliminar esta nota? Esta acción no se puede deshacer.')) {
-      deleteNote(existing.id);
+      await deleteNote(existing.id);
       navigate('/notas');
     }
   }
@@ -96,6 +88,64 @@ export function NoteEditor() {
       if (!tags.includes(t)) setTags([...tags, t]);
       setTagInput('');
     }
+  }
+
+  function handleExportPdf() {
+    const note = existing;
+    if (!note) return;
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <title>${note.title}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Georgia, 'Times New Roman', serif; max-width: 700px; margin: 40px auto; color: #1a1a1a; line-height: 1.7; padding: 0 20px; }
+    .header { border-bottom: 3px solid #4361ee; padding-bottom: 16px; margin-bottom: 20px; }
+    .brand { font-size: 11px; font-family: sans-serif; color: #6b7280; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 8px; }
+    h1 { font-size: 26px; line-height: 1.25; margin-bottom: 10px; }
+    .meta { font-size: 12px; font-family: sans-serif; color: #9ca3af; display: flex; gap: 12px; flex-wrap: wrap; }
+    .lead { font-size: 16px; color: #374151; font-style: italic; line-height: 1.6; border-left: 3px solid #4361ee; padding-left: 14px; margin: 20px 0; }
+    .body { font-size: 14px; }
+    .body h2 { font-size: 16px; margin: 20px 0 6px; }
+    .body p { margin-bottom: 12px; }
+    .body ul, .body ol { padding-left: 20px; margin-bottom: 12px; }
+    .body blockquote { border-left: 3px solid #d1d5db; padding-left: 12px; color: #6b7280; font-style: italic; margin: 12px 0; }
+    .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 11px; font-family: sans-serif; color: #9ca3af; display: flex; justify-content: space-between; }
+    @media print {
+      body { margin: 20px auto; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="background:#f3f4f6;padding:10px 20px;font-family:sans-serif;font-size:13px;display:flex;justify-content:space-between;align-items:center;margin:-40px -20px 30px;">
+    <span>Vista previa de impresión</span>
+    <button onclick="window.print()" style="background:#4361ee;color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;">Imprimir / Guardar PDF</button>
+  </div>
+  <div class="header">
+    <div class="brand">Mesa Central · somoseffe</div>
+    <h1>${note.title}</h1>
+    <div class="meta">
+      <span>${CAT_LABELS[note.category] ?? note.category}</span>
+      <span>Autor: ${note.authorName}</span>
+      ${note.approvedBy ? `<span>Aprobado por: ${note.approvedBy}</span>` : ''}
+      <span>${new Date(note.updatedAt).toLocaleDateString('es', { dateStyle: 'long' })}</span>
+      ${note.forTv ? `<span>TV · ${Math.floor((note.durationSecs ?? 60) / 60)}:${String((note.durationSecs ?? 60) % 60).padStart(2, '0')} min</span>` : ''}
+    </div>
+  </div>
+  ${note.lead ? `<div class="lead">${note.lead}</div>` : ''}
+  <div class="body">${note.body || bodyPlain.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</div>
+  ${note.tags.length > 0 ? `<div style="margin-top:24px;font-size:12px;font-family:sans-serif;color:#6b7280;">Etiquetas: ${note.tags.map((t) => '#' + t).join(' · ')}</div>` : ''}
+  <div class="footer">
+    <span>Mesa Central — somoseffe</span>
+    <span>Estado: ${note.status}</span>
+  </div>
+</body>
+</html>`);
+    win.document.close();
   }
 
   return (
@@ -113,21 +163,28 @@ export function NoteEditor() {
             <div className="flex items-center gap-2 mt-1">
               <StatusBadge status={existing.status} />
               {existing.status === 'rechazada' && existing.rejectedReason && (
-                <span className="text-xs text-red-600">
-                  Motivo: {existing.rejectedReason}
-                </span>
+                <span className="text-xs text-red-600">Motivo: {existing.rejectedReason}</span>
               )}
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           {existing && (
-            <button
-              onClick={handleDelete}
-              className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+            <>
+              <button
+                onClick={handleExportPdf}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <FileDown className="h-4 w-4" />
+                PDF
+              </button>
+              <button
+                onClick={handleDelete}
+                className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </>
           )}
           {canEdit && (
             <button
@@ -135,13 +192,13 @@ export function NoteEditor() {
               className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
             >
               <Save className="h-4 w-4" />
-              {saved ? 'Guardado' : 'Guardar'}
+              {saved ? 'Guardado ✓' : 'Guardar'}
             </button>
           )}
           {canSubmit && (
             <button
               onClick={handleSubmit}
-              disabled={!title.trim() || !body.trim()}
+              disabled={!title.trim() || !bodyPlain.trim()}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Send className="h-4 w-4" />
@@ -194,13 +251,11 @@ export function NoteEditor() {
 
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Cuerpo de la nota *</label>
-            <textarea
+            <RichTextEditor
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={setBody}
               disabled={!canEdit}
-              rows={14}
               placeholder="Desarrolla el contenido completo de la nota..."
-              className="w-full px-4 py-3 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 resize-y font-mono leading-relaxed"
             />
           </div>
         </div>

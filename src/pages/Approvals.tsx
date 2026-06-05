@@ -18,12 +18,12 @@ export function Approvals() {
     .slice(0, 10);
 
   function handleApprove(id: string) {
-    approveNote(id, currentUser.name);
+    void approveNote(id, currentUser.name);
   }
 
   function handleReject() {
     if (!rejectId || !rejectMsg.trim()) return;
-    rejectNote(rejectId, currentUser.name, rejectMsg.trim());
+    void rejectNote(rejectId, currentUser.name, rejectMsg.trim());
     setRejectId(null);
     setRejectMsg('');
   }

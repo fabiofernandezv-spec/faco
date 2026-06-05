@@ -2,21 +2,24 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Note, Rundown, User, MediaItem, NoteStatus } from '../types';
 import { MOCK_NOTES, MOCK_RUNDOWN, CURRENT_USER, MOCK_MEDIA } from '../data/mockData';
+import { supabaseEnabled, fetchNotes, createNote, updateNoteById, deleteNoteById } from '../lib/db';
 
 interface Store {
   currentUser: User;
   notes: Note[];
   rundown: Rundown;
   media: MediaItem[];
+  synced: boolean;
 
   setCurrentUser: (user: User) => void;
+  syncFromSupabase: () => Promise<void>;
 
-  addNote: (note: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  updateNote: (id: string, changes: Partial<Note>) => void;
-  deleteNote: (id: string) => void;
-  submitForReview: (id: string) => void;
-  approveNote: (id: string, editorName: string) => void;
-  rejectNote: (id: string, editorName: string, reason: string) => void;
+  addNote: (note: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+  updateNote: (id: string, changes: Partial<Note>) => Promise<void>;
+  deleteNote: (id: string) => Promise<void>;
+  submitForReview: (id: string) => Promise<void>;
+  approveNote: (id: string, editorName: string) => Promise<void>;
+  rejectNote: (id: string, editorName: string, reason: string) => Promise<void>;
 
   updateRundownItem: (itemId: string, status: 'pendiente' | 'al_aire' | 'emitido') => void;
   reorderRundown: (items: Rundown['items']) => void;
@@ -38,69 +41,90 @@ export const useStore = create<Store>()(
   persist(
     (set) => ({
       currentUser: CURRENT_USER,
-      notes: MOCK_NOTES,
+      notes:   MOCK_NOTES,
       rundown: MOCK_RUNDOWN,
-      media: MOCK_MEDIA,
+      media:   MOCK_MEDIA,
+      synced:  false,
 
       setCurrentUser: (user) => set({ currentUser: user }),
 
-      addNote: (note) =>
-        set((s) => ({
-          notes: [
-            ...s.notes,
-            { ...note, id: genId(), createdAt: now(), updatedAt: now() },
-          ],
-        })),
+      syncFromSupabase: async () => {
+        if (!supabaseEnabled) return;
+        try {
+          const notes = await fetchNotes();
+          set({ notes, synced: true });
+        } catch (e) {
+          console.error('Supabase sync failed:', e);
+        }
+      },
 
-      updateNote: (id, changes) =>
+      addNote: async (note) => {
+        if (supabaseEnabled) {
+          const created = await createNote(note);
+          set((s) => ({ notes: [created, ...s.notes] }));
+        } else {
+          set((s) => ({
+            notes: [{ ...note, id: genId(), createdAt: now(), updatedAt: now() }, ...s.notes],
+          }));
+        }
+      },
+
+      updateNote: async (id, changes) => {
+        if (supabaseEnabled) {
+          await updateNoteById(id, changes);
+        }
         set((s) => ({
           notes: s.notes.map((n) =>
             n.id === id ? { ...n, ...changes, updatedAt: now() } : n
           ),
-        })),
+        }));
+      },
 
-      deleteNote: (id) =>
-        set((s) => ({ notes: s.notes.filter((n) => n.id !== id) })),
+      deleteNote: async (id) => {
+        if (supabaseEnabled) {
+          await deleteNoteById(id);
+        }
+        set((s) => ({ notes: s.notes.filter((n) => n.id !== id) }));
+      },
 
-      submitForReview: (id) =>
+      submitForReview: async (id) => {
+        const changes = { status: 'en_revision' as NoteStatus };
+        if (supabaseEnabled) await updateNoteById(id, changes);
         set((s) => ({
           notes: s.notes.map((n) =>
-            n.id === id
-              ? { ...n, status: 'en_revision' as NoteStatus, updatedAt: now() }
-              : n
+            n.id === id ? { ...n, ...changes, updatedAt: now() } : n
           ),
-        })),
+        }));
+      },
 
-      approveNote: (id, editorName) =>
+      approveNote: async (id, editorName) => {
+        const changes = {
+          status: 'aprobada' as NoteStatus,
+          approvedAt: now(),
+          approvedBy: editorName,
+          rejectedReason: undefined,
+        };
+        if (supabaseEnabled) await updateNoteById(id, changes);
         set((s) => ({
           notes: s.notes.map((n) =>
-            n.id === id
-              ? {
-                  ...n,
-                  status: 'aprobada' as NoteStatus,
-                  approvedAt: now(),
-                  approvedBy: editorName,
-                  rejectedReason: undefined,
-                  updatedAt: now(),
-                }
-              : n
+            n.id === id ? { ...n, ...changes, updatedAt: now() } : n
           ),
-        })),
+        }));
+      },
 
-      rejectNote: (id, editorName, reason) =>
+      rejectNote: async (id, editorName, reason) => {
+        const changes = {
+          status: 'rechazada' as NoteStatus,
+          rejectedReason: reason,
+          approvedBy: editorName,
+        };
+        if (supabaseEnabled) await updateNoteById(id, changes);
         set((s) => ({
           notes: s.notes.map((n) =>
-            n.id === id
-              ? {
-                  ...n,
-                  status: 'rechazada' as NoteStatus,
-                  rejectedReason: reason,
-                  approvedBy: editorName,
-                  updatedAt: now(),
-                }
-              : n
+            n.id === id ? { ...n, ...changes, updatedAt: now() } : n
           ),
-        })),
+        }));
+      },
 
       updateRundownItem: (itemId, status) =>
         set((s) => ({

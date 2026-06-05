@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { Play, Pause, RotateCcw, Plus, Minus, ChevronDown } from 'lucide-react';
+import { htmlToPlainText } from '../components/RichTextEditor';
 
 export function Teleprompter() {
   const { notes, rundown } = useStore();
@@ -63,7 +64,11 @@ export function Teleprompter() {
   }
 
   const text = selectedNote
-    ? `${selectedNote.title}\n\n${selectedNote.lead ? selectedNote.lead + '\n\n' : ''}${selectedNote.body}`
+    ? [
+        selectedNote.title,
+        selectedNote.lead ? '\n' + selectedNote.lead : '',
+        '\n' + htmlToPlainText(selectedNote.body),
+      ].join('\n')
     : 'Selecciona una nota aprobada para el teleprompter.';
 
   return (
