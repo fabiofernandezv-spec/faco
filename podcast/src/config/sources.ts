@@ -3,27 +3,79 @@ import { SourceConfig } from "../types.js";
 /**
  * Lista de fuentes a monitorear.
  *
- * `verified: true` = la URL de feed fue confirmada por búsqueda antes de escribir
- * este archivo. `verified: false` = es una conjetura razonable (patrón típico de
- * WordPress /feed/) que el fetcher intentará, pero puede fallar o no existir; en
- * ese caso la fuente se omite del episodio y queda logueada como "sin feed".
- *
- * Revisá y ajustá esta lista con URLs reales antes de correr en producción:
- * la red de este entorno de desarrollo bloquea el acceso directo a estos
- * dominios, así que ninguna de estas URLs pudo probarse en vivo desde acá.
+ * `verified: true` = URL de feed confirmada en producción (viene del workflow
+ * n8n "OPANOTICIAS - Monitor Completo" que ya corre cada 6 minutos contra
+ * estos feeds reales). `verified: false` = conjetura razonable sin confirmar
+ * todavía; si falla, la fuente se omite del episodio y queda logueada.
  */
 export const SOURCES: SourceConfig[] = [
   {
     id: "crhoy",
-    name: "CRHoy.com",
+    name: "CRHoy",
     homepage: "https://www.crhoy.com/",
+    feedCandidates: ["https://wordpress.crhoy.com/feed/"],
+    kind: "medio",
+    verified: true,
+  },
+  {
+    id: "diarioextra",
+    name: "Diario Extra",
+    homepage: "https://www.diarioextra.com/",
+    feedCandidates: ["https://www.diarioextra.com/feed"],
+    kind: "medio",
+    verified: true,
+  },
+  {
+    id: "nacion",
+    name: "La Nación",
+    homepage: "https://www.nacion.com/",
+    feedCandidates: ["https://www.nacion.com/arc/outboundfeeds/rss/?outputType=xml"],
+    kind: "medio",
+    verified: true,
+  },
+  {
+    id: "elmundocr",
+    name: "El Mundo CR",
+    homepage: "https://www.elmundo.cr/",
+    feedCandidates: ["https://www.elmundo.cr/feed"],
+    kind: "medio",
+    verified: true,
+  },
+  {
+    id: "elfinanciero",
+    name: "El Financiero CR",
+    homepage: "https://www.elfinancierocr.com/",
+    feedCandidates: ["https://www.elfinancierocr.com/arc/outboundfeeds/rss/?outputType=xml"],
+    kind: "medio",
+    verified: true,
+  },
+  {
+    id: "ameliarueda",
+    name: "Amelia Rueda",
+    homepage: "https://ameliarueda.com/",
+    // AmeliaRueda no publica RSS propio; se usa Google News acotado a su sitio
+    // (mismo truco que ya usa el workflow de n8n en producción).
     feedCandidates: [
-      "https://www.crhoy.com/feed",
-      "https://www.crhoy.com/nacionales/feed",
-      "https://www.crhoy.com/economia/feed",
+      "https://news.google.com/rss/search?q=site:ameliarueda.com&hl=es-419&gl=CR&ceid=CR:es-419",
     ],
     kind: "medio",
-    verified: false,
+    verified: true,
+  },
+  {
+    id: "delfino",
+    name: "Delfino.cr",
+    homepage: "https://delfino.cr/",
+    feedCandidates: ["https://delfino.cr/feed"],
+    kind: "medio",
+    verified: true,
+  },
+  {
+    id: "teletica",
+    name: "Teletica",
+    homepage: "https://teletica.com/",
+    feedCandidates: ["https://teletica.com/rss/feed"],
+    kind: "medio",
+    verified: true,
   },
   {
     id: "ncr",
@@ -32,14 +84,6 @@ export const SOURCES: SourceConfig[] = [
     feedCandidates: ["https://ncrnoticias.com/feed/", "https://ncrnoticias.com/feed"],
     kind: "medio",
     verified: false,
-  },
-  {
-    id: "elmundocr",
-    name: "El Mundo CR",
-    homepage: "https://elmundo.cr/",
-    feedCandidates: ["https://elmundo.cr/feed/"],
-    kind: "medio",
-    verified: true,
   },
   {
     id: "genteopa",
@@ -54,22 +98,6 @@ export const SOURCES: SourceConfig[] = [
     name: "Telediario CR",
     homepage: "https://telediariocr.com/",
     feedCandidates: ["https://telediariocr.com/feed/", "https://telediariocr.com/feed"],
-    kind: "medio",
-    verified: false,
-  },
-  {
-    id: "delfino",
-    name: "Delfino.cr",
-    homepage: "https://delfino.cr/",
-    feedCandidates: ["https://delfino.cr/feed"],
-    kind: "medio",
-    verified: true,
-  },
-  {
-    id: "ameliarueda",
-    name: "AmeliaRueda.com",
-    homepage: "https://ameliarueda.com/",
-    feedCandidates: ["https://ameliarueda.com/feed", "https://ameliarueda.com/feed/"],
     kind: "medio",
     verified: false,
   },
