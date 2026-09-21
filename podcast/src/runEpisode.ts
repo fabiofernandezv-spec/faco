@@ -2,6 +2,8 @@ import "dotenv/config";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fetchAllFeeds } from "./lib/fetchFeeds.js";
+import { readNewsFromDb } from "./lib/readFromDb.js";
+import { NewsItem } from "./types.js";
 import { rankTopStories } from "./lib/rankNews.js";
 import { generateEpisodeScript } from "./lib/generateScript.js";
 import { synthesizeSpeech } from "./lib/tts.js";
@@ -14,16 +16,32 @@ async function main() {
   const outDir = path.resolve("output", today);
   await mkdir(outDir, { recursive: true });
 
-  console.log("1/5 · Recopilando titulares...");
-  const { items, failedSources } = await fetchAllFeeds();
-  if (failedSources.length) {
-    console.warn(`   Sin feed disponible (revisar URL manualmente): ${failedSources.join(", ")}`);
+  const newsSource = process.env.NEWS_SOURCE || "rss"; // "rss" | "db"
+  let items: NewsItem[];
+
+  if (newsSource === "db") {
+    console.log("1/5 · Leyendo noticias desde la base AGENDACR (articles_raw)...");
+    const result = await readNewsFromDb();
+    items = result.items;
+    if (result.unmatchedCount) {
+      console.warn(`   ${result.unmatchedCount} notas con dominio no reconocido (revisar SOURCES).`);
+    }
+  } else {
+    console.log("1/5 · Recopilando titulares por RSS directo...");
+    const { items: rssItems, failedSources } = await fetchAllFeeds();
+    items = rssItems;
+    if (failedSources.length) {
+      console.warn(`   Sin feed disponible (revisar URL manualmente): ${failedSources.join(", ")}`);
+    }
   }
+
   if (!items.length) {
     throw new Error(
-      "No se obtuvo ninguna noticia de ninguna fuente. Revisá src/config/sources.ts: " +
-        "las URLs de feed son conjeturas hasta que las confirmes en un entorno con acceso " +
-        "a esos dominios (este sandbox de desarrollo los bloquea).",
+      newsSource === "db"
+        ? "articles_raw no devolvió notas para la ventana de tiempo configurada. Revisá que el " +
+          "workflow de n8n siga corriendo y que las credenciales de Postgres sean correctas."
+        : "No se obtuvo ninguna noticia de ninguna fuente. Revisá src/config/sources.ts: " +
+          "las URLs de feed sin verificar pueden haber cambiado.",
     );
   }
   console.log(`   ${items.length} notas de ${new Set(items.map((i) => i.sourceId)).size} fuentes.`);

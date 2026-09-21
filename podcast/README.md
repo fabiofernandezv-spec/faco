@@ -7,11 +7,33 @@ recopiladas de varios medios digitales y fuentes de gobierno.
 ## Cómo funciona (resumen)
 
 ```
-RSS de cada medio → agrupar/rankear notas del día → Claude escribe el guion
-(citando fuentes) → ElevenLabs genera el audio → ffmpeg arma el video vertical
-con subtítulos quemados → (opcional) se sube a YouTube / TikTok / se agrega
-al feed RSS del podcast para Spotify y Apple Podcasts
+RSS de cada medio (o la base AGENDACR que ya llena n8n) → agrupar/rankear
+notas del día → Claude escribe el guion (citando fuentes) → ElevenLabs genera
+el audio → ffmpeg arma el video vertical con subtítulos quemados → (opcional)
+se sube a YouTube / TikTok / se agrega al feed RSS del podcast para Spotify y
+Apple Podcasts
 ```
+
+### Dos formas de traer las noticias
+
+Con `NEWS_SOURCE=rss` (default), el pipeline le pega directo a los feeds de
+`src/config/sources.ts`. Con `NEWS_SOURCE=db`, lee de la tabla `articles_raw`
+de tu base Postgres **AGENDACR** — la misma que ya llena cada 6 minutos el
+workflow n8n "OPANOTICIAS - Monitor Completo" — así no duplicás el trabajo de
+scraping/dedup que ya tenés corriendo en producción.
+
+Ojo con un detalle de ese workflow: el nodo que inserta en `articles_raw`
+guarda `source_id = 1` para todas las notas sin importar el medio (está
+hardcodeado). El mensaje de Telegram sale bien porque usa el nombre del medio
+en memoria antes de insertar, pero la tabla en sí no distingue el medio por
+esa columna. `src/lib/readFromDb.ts` lo resuelve infiriendo el medio a partir
+del dominio de cada `url`, cruzándolo contra `src/config/sources.ts` — no
+hace falta arreglar nada en n8n para que esto funcione, pero si en algún
+momento corregís el `source_id` ahí, se puede simplificar a un JOIN directo.
+
+Igual que con los RSS, esa base vive en tu VPS privada: `npm run db-only`
+para probarla, corriéndolo desde una red que sí llegue a ese Postgres (tu
+máquina, el VPS, o donde corra n8n) — no desde este sandbox de desarrollo.
 
 Corré todo con:
 
