@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Tv2, Play, CheckCircle, Clock, Pause, Clapperboard, ChevronUp, ChevronDown, Plus, X, Trash2 } from 'lucide-react';
-import { useStore } from '../store/useStore';
+import { useStore, useCurrentUser } from '../store/useStore';
+import { canChangeRundownStatus, canManageRundown } from '../lib/permissions';
 import type { RundownItem } from '../types';
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
@@ -29,6 +30,8 @@ function RundownRow({
   onRemove,
   isFirst,
   isLast,
+  canManage,
+  canChangeStatus,
 }: {
   item: RundownItem;
   onStatusChange: (status: RundownItem['status']) => void;
@@ -37,6 +40,8 @@ function RundownRow({
   onRemove: () => void;
   isFirst: boolean;
   isLast: boolean;
+  canManage: boolean;
+  canChangeStatus: boolean;
 }) {
   const tc   = TYPE_CONFIG[item.type];
   const sc   = STATUS_CONFIG[item.status];
@@ -46,11 +51,11 @@ function RundownRow({
     <tr className={`border-b border-gray-100 ${item.status === 'al_aire' ? 'bg-red-50' : 'hover:bg-gray-50'} transition-colors`}>
       <td className="px-4 py-3 text-center">
         <div className="flex flex-col items-center gap-0.5">
-          <button onClick={onMoveUp} disabled={isFirst} className="disabled:opacity-20 hover:text-brand-600">
+          <button onClick={onMoveUp} disabled={isFirst || !canManage} aria-label="Subir" className="disabled:opacity-20 hover:text-brand-600">
             <ChevronUp className="h-3 w-3" />
           </button>
           <span className="text-xs font-bold text-gray-400 w-5 text-center">{item.order}</span>
-          <button onClick={onMoveDown} disabled={isLast} className="disabled:opacity-20 hover:text-brand-600">
+          <button onClick={onMoveDown} disabled={isLast || !canManage} aria-label="Bajar" className="disabled:opacity-20 hover:text-brand-600">
             <ChevronDown className="h-3 w-3" />
           </button>
         </div>
@@ -81,19 +86,22 @@ function RundownRow({
           <select
             value={item.status}
             onChange={(e) => onStatusChange(e.target.value as RundownItem['status'])}
+            disabled={!canChangeStatus}
+            aria-label="Estado del segmento"
             className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-500"
           >
             <option value="pendiente">Pendiente</option>
             <option value="al_aire">Al aire</option>
             <option value="emitido">Emitido</option>
           </select>
-          <button
+          {canManage && <button
             onClick={onRemove}
+            aria-label="Quitar del rundown"
             className="p-1 text-gray-300 hover:text-red-400 transition-colors"
             title="Quitar del rundown"
           >
             <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          </button>}
         </div>
       </td>
     </tr>
@@ -101,26 +109,23 @@ function RundownRow({
 }
 
 export function Rundown() {
-  const { notes, rundown, updateRundownItem, reorderRundown, addRundownItem, removeRundownItem } = useStore();
+  const currentUser = useCurrentUser();
+  const { notes, rundown, setRundownItemStatus, moveRundownItem, addRundownItem, removeRundownItem } = useStore();
   const [showLegend,  setShowLegend]  = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const canManage       = canManageRundown(currentUser);
+  const canChangeStatus = canChangeRundownStatus(currentUser);
+
+  if (!rundown) return <CreateRundown canManage={canManage} />;
 
   const availableNotes = notes.filter(
-    (n) => n.forTv && n.status === 'aprobada' && !rundown.items.some((i) => i.noteId === n.id)
+    (n) => n.forTv && (n.status === 'aprobada' || n.status === 'publicada') && !rundown.items.some((i) => i.noteId === n.id)
   );
 
   const emitidos   = rundown.items.filter((i) => i.status === 'emitido').length;
   const totalSecs  = rundown.items.reduce((a, i) => a + i.durationSecs, 0);
   const emitSecs   = rundown.items.filter((i) => i.status === 'emitido').reduce((a, i) => a + i.durationSecs, 0);
-  const progress   = Math.round((emitSecs / totalSecs) * 100);
-
-  function moveItem(idx: number, dir: -1 | 1) {
-    const items = [...rundown.items];
-    const swap  = idx + dir;
-    if (swap < 0 || swap >= items.length) return;
-    [items[idx], items[swap]] = [items[swap], items[idx]];
-    reorderRundown(items.map((item, i) => ({ ...item, order: i + 1 })));
-  }
+  const progress   = totalSecs > 0 ? Math.round((emitSecs / totalSecs) * 100) : 0;
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -135,13 +140,13 @@ export function Rundown() {
           <p className="text-xs text-gray-400 mt-0.5">{rundown.channel} · {rundown.date}</p>
         </div>
         <div className="flex items-start gap-4">
-          <button
+          {canManage && <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 bg-brand-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors"
           >
             <Plus className="h-4 w-4" />
             Agregar nota
-          </button>
+          </button>}
           <div className="text-right">
             <p className="text-xs text-gray-400">Duración total</p>
             <p className="text-2xl font-bold text-gray-900">{fmtSecs(totalSecs)}</p>
@@ -171,7 +176,7 @@ export function Rundown() {
                   {availableNotes.map((note) => (
                     <li key={note.id}>
                       <button
-                        onClick={() => { addRundownItem(note); setShowAddModal(false); }}
+                        onClick={() => { void addRundownItem(note).then((ok) => ok && setShowAddModal(false)); }}
                         className="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-brand-300 hover:bg-brand-50 transition-colors group"
                       >
                         <p className="text-sm font-medium text-gray-900 group-hover:text-brand-700">{note.title}</p>
@@ -244,10 +249,12 @@ export function Rundown() {
               <RundownRow
                 key={item.id}
                 item={item}
-                onStatusChange={(s) => updateRundownItem(item.id, s)}
-                onMoveUp={() => moveItem(idx, -1)}
-                onMoveDown={() => moveItem(idx, 1)}
-                onRemove={() => removeRundownItem(item.id)}
+                onStatusChange={(s) => void setRundownItemStatus(item.id, s)}
+                onMoveUp={() => void moveRundownItem(idx, -1)}
+                onMoveDown={() => void moveRundownItem(idx, 1)}
+                onRemove={() => void removeRundownItem(item.id)}
+                canManage={canManage}
+                canChangeStatus={canChangeStatus}
                 isFirst={idx === 0}
                 isLast={idx === rundown.items.length - 1}
               />
@@ -265,6 +272,42 @@ export function Rundown() {
             <p className="text-xs text-orange-600">El bloque de publicidad está al aire.</p>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function CreateRundown({ canManage }: { canManage: boolean }) {
+  const createRundown = useStore((s) => s.createRundown);
+  const [title,   setTitle]   = useState('Noticiero Central');
+  const [channel, setChannel] = useState('');
+  const [date,    setDate]    = useState(() => new Date().toISOString().slice(0, 10));
+  const input = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500';
+
+  return (
+    <div className="p-8 max-w-lg mx-auto">
+      <div className="flex items-center gap-2 mb-1">
+        <Tv2 className="h-5 w-5 text-brand-500" />
+        <h1 className="text-2xl font-bold text-gray-900">Rundown / Escaleta TV</h1>
+      </div>
+      <p className="text-sm text-gray-500 mb-6">No hay un rundown activo.</p>
+      {canManage ? (
+        <form
+          onSubmit={(e) => { e.preventDefault(); void createRundown({ title, channel, date }); }}
+          className="bg-white rounded-xl border border-gray-200 p-5 space-y-3"
+        >
+          <label className="block"><span className="block text-xs text-gray-500 mb-1">Título</span>
+            <input className={input} value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} /></label>
+          <label className="block"><span className="block text-xs text-gray-500 mb-1">Canal</span>
+            <input className={input} value={channel} onChange={(e) => setChannel(e.target.value)} maxLength={100} /></label>
+          <label className="block"><span className="block text-xs text-gray-500 mb-1">Fecha</span>
+            <input className={input} type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></label>
+          <button type="submit" className="flex items-center gap-2 bg-brand-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-600">
+            <Plus className="h-4 w-4" /> Crear rundown
+          </button>
+        </form>
+      ) : (
+        <p className="text-sm text-gray-400">Un editor o director debe crear el rundown del día.</p>
       )}
     </div>
   );

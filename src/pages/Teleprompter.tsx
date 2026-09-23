@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { Play, Pause, RotateCcw, Plus, Minus, ChevronDown } from 'lucide-react';
-import { htmlToPlainText } from '../components/RichTextEditor';
+import { htmlToPlainText } from '../lib/sanitize';
 
 export function Teleprompter() {
   const { notes, rundown } = useStore();
@@ -23,7 +23,7 @@ export function Teleprompter() {
 
   const selectedNote = notes.find((n) => n.id === selectedNoteId);
 
-  const alAireId = rundown.items.find((i) => i.status === 'al_aire')?.noteId;
+  const alAireId = rundown?.items.find((i) => i.status === 'al_aire')?.noteId;
 
   // Auto-select note that's al_aire
   useEffect(() => {

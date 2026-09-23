@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Save, Send, Trash2, Tv2, Tag, X, ListVideo, CheckCircle, FileDown } from 'lucide-react';
-import { useStore } from '../store/useStore';
+import { useStore, useCurrentUser } from '../store/useStore';
 import { StatusBadge } from '../components/StatusBadge';
 import { RichTextEditor, htmlToPlainText } from '../components/RichTextEditor';
+import { buildPrintHtml } from '../lib/printNote';
+import {
+  canCreateNote, canDeleteNote, canEditNote, canManageRundown, canSubmitNote,
+} from '../lib/permissions';
 import type { NoteCategory } from '../types';
 
 const CATEGORIES: { value: NoteCategory; label: string }[] = [
@@ -17,16 +21,11 @@ const CATEGORIES: { value: NoteCategory; label: string }[] = [
   { value: 'entretenimiento',label: 'Entretenimiento' },
 ];
 
-const CAT_LABELS: Record<string, string> = {
-  nacional: 'Nacional', internacional: 'Internacional', economia: 'Economía',
-  deportes: 'Deportes', cultura: 'Cultura', tecnologia: 'Tecnología',
-  salud: 'Salud', entretenimiento: 'Entretenimiento',
-};
-
 export function NoteEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { notes, currentUser, rundown, addNote, updateNote, deleteNote, submitForReview, addRundownItem } = useStore();
+  const currentUser = useCurrentUser();
+  const { notes, rundown, saveNote, deleteNote, addRundownItem } = useStore();
 
   const isNew    = id === 'nueva';
   const existing = isNew ? null : notes.find((n) => n.id === id);
@@ -40,112 +39,61 @@ export function NoteEditor() {
   const [tagInput, setTagInput] = useState('');
   const [tags,     setTags]     = useState<string[]>(existing?.tags ?? []);
   const [saved,    setSaved]    = useState(false);
+  const [busy,     setBusy]     = useState(false);
 
   useEffect(() => {
     if (!isNew && !existing) navigate('/notas');
   }, [isNew, existing, navigate]);
 
-  const canEdit   = isNew || existing?.status === 'borrador' || existing?.status === 'rechazada';
-  const canSubmit = canEdit && (existing?.status === 'borrador' || existing?.status === 'rechazada' || isNew);
-  const inRundown = existing ? rundown.items.some((i) => i.noteId === existing.id) : false;
-  const canAddToRundown = !isNew && existing?.status === 'aprobada' && existing?.forTv && !inRundown;
+  const canEdit   = isNew ? canCreateNote(currentUser) : canEditNote(currentUser, existing);
+  const canSubmit = canEdit && canSubmitNote(currentUser, existing);
+  const canDelete = canDeleteNote(currentUser, existing);
+  const inRundown = existing && rundown ? rundown.items.some((i) => i.noteId === existing.id) : false;
+  const canAddToRundown = !isNew && !!rundown && canManageRundown(currentUser)
+    && (existing?.status === 'aprobada' || existing?.status === 'publicada') && existing?.forTv && !inRundown;
   const bodyPlain = htmlToPlainText(body);
 
-  async function handleSave() {
-    if (isNew) {
-      await addNote({ title, lead, body, category, forTv, durationSecs: duration, status: 'borrador', authorId: currentUser.id, authorName: currentUser.name, media: [], tags });
+  const content = () => ({ title, lead, body, category, forTv, durationSecs: duration, tags });
+
+  async function persist(submit: boolean) {
+    setBusy(true);
+    const note = await saveNote(isNew ? null : existing!.id, content(), submit);
+    setBusy(false);
+    if (!note) return;
+    if (isNew || submit) {
       navigate('/notas');
-    } else if (existing) {
-      await updateNote(existing.id, { title, lead, body, category, forTv, durationSecs: duration, tags });
+    } else {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    }
-  }
-
-  async function handleSubmit() {
-    if (isNew) {
-      await addNote({ title, lead, body, category, forTv, durationSecs: duration, status: 'en_revision', authorId: currentUser.id, authorName: currentUser.name, media: [], tags });
-      navigate('/notas');
-    } else if (existing) {
-      await updateNote(existing.id, { title, lead, body, category, forTv, durationSecs: duration, tags });
-      await submitForReview(existing.id);
-      navigate('/notas');
     }
   }
 
   async function handleDelete() {
     if (!existing) return;
     if (window.confirm('¿Eliminar esta nota? Esta acción no se puede deshacer.')) {
-      await deleteNote(existing.id);
-      navigate('/notas');
+      if (await deleteNote(existing.id)) navigate('/notas');
     }
   }
 
   function addTag(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && tagInput.trim()) {
       e.preventDefault();
-      const t = tagInput.trim().toLowerCase().replace(/\s+/g, '-');
-      if (!tags.includes(t)) setTags([...tags, t]);
+      const t = tagInput.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 40);
+      if (t && !tags.includes(t) && tags.length < 20) setTags([...tags, t]);
       setTagInput('');
     }
   }
 
   function handleExportPdf() {
-    const note = existing;
-    if (!note) return;
+    if (!existing) return;
     const win = window.open('', '_blank');
     if (!win) return;
-    win.document.write(`<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8"/>
-  <title>${note.title}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Georgia, 'Times New Roman', serif; max-width: 700px; margin: 40px auto; color: #1a1a1a; line-height: 1.7; padding: 0 20px; }
-    .header { border-bottom: 3px solid #4361ee; padding-bottom: 16px; margin-bottom: 20px; }
-    .brand { font-size: 11px; font-family: sans-serif; color: #6b7280; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 8px; }
-    h1 { font-size: 26px; line-height: 1.25; margin-bottom: 10px; }
-    .meta { font-size: 12px; font-family: sans-serif; color: #9ca3af; display: flex; gap: 12px; flex-wrap: wrap; }
-    .lead { font-size: 16px; color: #374151; font-style: italic; line-height: 1.6; border-left: 3px solid #4361ee; padding-left: 14px; margin: 20px 0; }
-    .body { font-size: 14px; }
-    .body h2 { font-size: 16px; margin: 20px 0 6px; }
-    .body p { margin-bottom: 12px; }
-    .body ul, .body ol { padding-left: 20px; margin-bottom: 12px; }
-    .body blockquote { border-left: 3px solid #d1d5db; padding-left: 12px; color: #6b7280; font-style: italic; margin: 12px 0; }
-    .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 11px; font-family: sans-serif; color: #9ca3af; display: flex; justify-content: space-between; }
-    @media print {
-      body { margin: 20px auto; }
-      .no-print { display: none; }
-    }
-  </style>
-</head>
-<body>
-  <div class="no-print" style="background:#f3f4f6;padding:10px 20px;font-family:sans-serif;font-size:13px;display:flex;justify-content:space-between;align-items:center;margin:-40px -20px 30px;">
-    <span>Vista previa de impresión</span>
-    <button onclick="window.print()" style="background:#4361ee;color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;">Imprimir / Guardar PDF</button>
-  </div>
-  <div class="header">
-    <div class="brand">Mesa Central · somoseffe</div>
-    <h1>${note.title}</h1>
-    <div class="meta">
-      <span>${CAT_LABELS[note.category] ?? note.category}</span>
-      <span>Autor: ${note.authorName}</span>
-      ${note.approvedBy ? `<span>Aprobado por: ${note.approvedBy}</span>` : ''}
-      <span>${new Date(note.updatedAt).toLocaleDateString('es', { dateStyle: 'long' })}</span>
-      ${note.forTv ? `<span>TV · ${Math.floor((note.durationSecs ?? 60) / 60)}:${String((note.durationSecs ?? 60) % 60).padStart(2, '0')} min</span>` : ''}
-    </div>
-  </div>
-  ${note.lead ? `<div class="lead">${note.lead}</div>` : ''}
-  <div class="body">${note.body || bodyPlain.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</div>
-  ${note.tags.length > 0 ? `<div style="margin-top:24px;font-size:12px;font-family:sans-serif;color:#6b7280;">Etiquetas: ${note.tags.map((t) => '#' + t).join(' · ')}</div>` : ''}
-  <div class="footer">
-    <span>Mesa Central — somoseffe</span>
-    <span>Estado: ${note.status}</span>
-  </div>
-</body>
-</html>`);
+    win.opener = null;
+    win.document.open();
+    win.document.write(buildPrintHtml(existing));
     win.document.close();
+    win.focus();
+    win.print();
   }
 
   return (
@@ -163,7 +111,9 @@ export function NoteEditor() {
             <div className="flex items-center gap-2 mt-1">
               <StatusBadge status={existing.status} />
               {existing.status === 'rechazada' && existing.rejectedReason && (
-                <span className="text-xs text-red-600">Motivo: {existing.rejectedReason}</span>
+                <span className="text-xs text-red-600">
+                  Motivo{existing.rejectedBy ? ` (${existing.rejectedBy})` : ''}: {existing.rejectedReason}
+                </span>
               )}
             </div>
           )}
@@ -178,18 +128,21 @@ export function NoteEditor() {
                 <FileDown className="h-4 w-4" />
                 PDF
               </button>
-              <button
+              {canDelete && <button
                 onClick={handleDelete}
+                title="Eliminar nota"
+                aria-label="Eliminar nota"
                 className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
               >
                 <Trash2 className="h-4 w-4" />
-              </button>
+              </button>}
             </>
           )}
           {canEdit && (
             <button
-              onClick={handleSave}
-              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              onClick={() => void persist(false)}
+              disabled={busy || !title.trim()}
+              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
             >
               <Save className="h-4 w-4" />
               {saved ? 'Guardado ✓' : 'Guardar'}
@@ -197,8 +150,8 @@ export function NoteEditor() {
           )}
           {canSubmit && (
             <button
-              onClick={handleSubmit}
-              disabled={!title.trim() || !bodyPlain.trim()}
+              onClick={() => void persist(true)}
+              disabled={busy || !title.trim() || !bodyPlain.trim()}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Send className="h-4 w-4" />
@@ -207,7 +160,7 @@ export function NoteEditor() {
           )}
           {canAddToRundown && existing && (
             <button
-              onClick={() => addRundownItem(existing)}
+              onClick={() => void addRundownItem(existing)}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-tv-green rounded-lg hover:opacity-90 transition-colors"
             >
               <ListVideo className="h-4 w-4" />
@@ -233,6 +186,7 @@ export function NoteEditor() {
               onChange={(e) => setTitle(e.target.value)}
               disabled={!canEdit}
               placeholder="Título de la nota"
+              maxLength={300}
               className="w-full px-4 py-3 text-lg font-semibold border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:text-gray-500"
             />
           </div>
@@ -244,6 +198,7 @@ export function NoteEditor() {
               onChange={(e) => setLead(e.target.value)}
               disabled={!canEdit}
               rows={2}
+              maxLength={2000}
               placeholder="Resumen de un párrafo que resume la noticia..."
               className="w-full px-4 py-3 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 resize-none"
             />
@@ -295,7 +250,7 @@ export function NoteEditor() {
                 <input
                   type="number"
                   value={duration}
-                  onChange={(e) => setDuration(Number(e.target.value))}
+                  onChange={(e) => setDuration(Math.min(600, Math.max(10, Number(e.target.value) || 10)))}
                   disabled={!canEdit}
                   min={10}
                   max={600}
@@ -319,7 +274,7 @@ export function NoteEditor() {
                 <span key={t} className="inline-flex items-center gap-1 bg-gray-100 text-gray-600 rounded-full px-2 py-0.5 text-xs">
                   {t}
                   {canEdit && (
-                    <button onClick={() => setTags(tags.filter((x) => x !== t))}>
+                    <button onClick={() => setTags(tags.filter((x) => x !== t))} aria-label={`Quitar etiqueta ${t}`}>
                       <X className="h-3 w-3" />
                     </button>
                   )}

@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle, XCircle, Eye, Clock } from 'lucide-react';
-import { useStore } from '../store/useStore';
+import { useStore, useCurrentUser } from '../store/useStore';
+import { canReviewNotes } from '../lib/permissions';
 import { StatusBadge } from '../components/StatusBadge';
 
 export function Approvals() {
-  const { notes, currentUser, approveNote, rejectNote } = useStore();
+  const currentUser = useCurrentUser();
+  const { notes, approveNote, rejectNote } = useStore();
   const [rejectId,  setRejectId]  = useState<string | null>(null);
   const [rejectMsg, setRejectMsg] = useState('');
 
-  const canApprove = currentUser.role === 'editor' || currentUser.role === 'director';
+  const canApprove = canReviewNotes(currentUser);
 
   const pending  = notes.filter((n) => n.status === 'en_revision');
   const resolved = notes
@@ -18,14 +20,14 @@ export function Approvals() {
     .slice(0, 10);
 
   function handleApprove(id: string) {
-    void approveNote(id, currentUser.name);
+    void approveNote(id);
   }
 
   function handleReject() {
     if (!rejectId || !rejectMsg.trim()) return;
-    void rejectNote(rejectId, currentUser.name, rejectMsg.trim());
-    setRejectId(null);
-    setRejectMsg('');
+    void rejectNote(rejectId, rejectMsg.trim()).then((ok) => {
+      if (ok) { setRejectId(null); setRejectMsg(''); }
+    });
   }
 
   return (
@@ -109,6 +111,7 @@ export function Approvals() {
               value={rejectMsg}
               onChange={(e) => setRejectMsg(e.target.value)}
               rows={4}
+              maxLength={2000}
               placeholder="Motivo del rechazo..."
               className="w-full border border-gray-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
               autoFocus
@@ -161,7 +164,7 @@ export function Approvals() {
                     </td>
                     <td className="px-4 py-3 text-gray-600">{note.authorName}</td>
                     <td className="px-4 py-3"><StatusBadge status={note.status} /></td>
-                    <td className="px-4 py-3 text-gray-600">{note.approvedBy ?? '—'}</td>
+                    <td className="px-4 py-3 text-gray-600">{(note.status === 'rechazada' ? note.rejectedBy : note.approvedBy) ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-400 text-xs">
                       {new Date(note.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })}
                     </td>

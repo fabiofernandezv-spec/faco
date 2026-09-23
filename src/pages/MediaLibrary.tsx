@@ -1,6 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ImageIcon, Film, Music, Upload, Search, Trash2 } from 'lucide-react';
-import { useStore } from '../store/useStore';
+import { useStore, useCurrentUser } from '../store/useStore';
+import { canDeleteMedia, canUploadMedia } from '../lib/permissions';
+import { ALLOWED_MIME_TYPES } from '../lib/mediaService';
 import type { MediaItem } from '../types';
 
 const TYPE_ICONS: Record<MediaItem['type'], React.FC<{ className?: string }>> = {
@@ -15,7 +17,13 @@ function fmtSize(bytes: number) {
 }
 
 export function MediaLibrary() {
-  const { media, addMedia, currentUser } = useStore();
+  const currentUser = useCurrentUser();
+  const { media, uploadMedia, deleteMedia, refreshMedia } = useStore();
+  const [uploading, setUploading] = useState(false);
+  const canUpload = canUploadMedia(currentUser);
+
+  // Las URLs firmadas caducan: se renuevan al entrar a la biblioteca.
+  useEffect(() => { void refreshMedia(); }, [refreshMedia]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'' | MediaItem['type']>('');
   const [dragging, setDragging] = useState(false);
@@ -27,28 +35,22 @@ export function MediaLibrary() {
     return matchSearch && matchType;
   });
 
-  function handleFiles(files: FileList) {
-    Array.from(files).forEach((file) => {
-      const type: MediaItem['type'] =
-        file.type.startsWith('video') ? 'video' :
-        file.type.startsWith('audio') ? 'audio' : 'image';
+  async function handleFiles(files: FileList) {
+    if (!canUpload) return;
+    setUploading(true);
+    await uploadMedia(Array.from(files));
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = '';
+  }
 
-      const url = URL.createObjectURL(file);
-      addMedia({
-        name: file.name,
-        type,
-        url,
-        size: file.size,
-        uploadedBy: currentUser.name,
-        uploadedAt: new Date().toISOString(),
-      });
-    });
+  function handleDelete(item: MediaItem) {
+    if (window.confirm(`¿Eliminar "${item.name}"?`)) void deleteMedia(item);
   }
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragging(false);
-    if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+    if (e.dataTransfer.files) void handleFiles(e.dataTransfer.files);
   }
 
   return (
@@ -58,25 +60,26 @@ export function MediaLibrary() {
           <h1 className="text-2xl font-bold text-gray-900">Biblioteca de Medios</h1>
           <p className="text-sm text-gray-500 mt-0.5">{media.length} archivos · imágenes, video y audio</p>
         </div>
-        <button
+        {canUpload && <button
           onClick={() => fileRef.current?.click()}
-          className="flex items-center gap-2 bg-brand-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors"
+          disabled={uploading}
+          className="flex items-center gap-2 disabled:opacity-50 bg-brand-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors"
         >
           <Upload className="h-4 w-4" />
-          Subir archivo
-        </button>
+          {uploading ? 'Subiendo…' : 'Subir archivo'}
+        </button>}
         <input
           ref={fileRef}
           type="file"
           multiple
-          accept="image/*,video/*,audio/*"
+          accept={ALLOWED_MIME_TYPES.join(',')}
           className="hidden"
-          onChange={(e) => e.target.files && handleFiles(e.target.files)}
+          onChange={(e) => e.target.files && void handleFiles(e.target.files)}
         />
       </div>
 
       {/* Drop zone */}
-      <div
+      {canUpload && <div
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
@@ -91,8 +94,8 @@ export function MediaLibrary() {
         <p className="text-sm text-gray-500">
           {dragging ? 'Suelta los archivos aquí' : 'Arrastra archivos o haz clic para seleccionar'}
         </p>
-        <p className="text-xs text-gray-400 mt-1">Imágenes, videos y audios</p>
-      </div>
+        <p className="text-xs text-gray-400 mt-1">JPG, PNG, WebP, GIF, MP4, WebM, MOV, MP3, WAV, OGG, AAC · máx. 100 MB</p>
+      </div>}
 
       {/* Filters */}
       <div className="flex gap-3 mb-6">
@@ -136,7 +139,7 @@ export function MediaLibrary() {
               <div key={item.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden group">
                 {/* Preview */}
                 <div className="h-36 bg-gray-100 flex items-center justify-center relative overflow-hidden">
-                  {item.type === 'image' && item.url !== '#' ? (
+                  {item.type === 'image' && item.url && item.url !== '#' ? (
                     <img
                       src={item.url}
                       alt={item.name}
@@ -147,9 +150,15 @@ export function MediaLibrary() {
                     <Icon className="h-10 w-10 text-gray-300" />
                   )}
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
-                  <button className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  {canDeleteMedia(currentUser, item) && (
+                    <button
+                      onClick={() => handleDelete(item)}
+                      aria-label={`Eliminar ${item.name}`}
+                      className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
                   <span className={`absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white ${
                     item.type === 'image' ? 'bg-blue-500' :
                     item.type === 'video' ? 'bg-purple-500' : 'bg-green-500'

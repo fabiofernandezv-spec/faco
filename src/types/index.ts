@@ -28,8 +28,12 @@ export interface MediaItem {
   id: string;
   name: string;
   type: 'image' | 'video' | 'audio';
+  /** URL para mostrar (firmada y temporal cuando viene de Supabase Storage). */
   url: string;
+  storagePath?: string;
+  mimeType?: string;
   size: number;
+  uploadedById?: string;
   uploadedBy: string;
   uploadedAt: string;
 }
@@ -49,6 +53,8 @@ export interface Note {
   updatedAt: string;
   approvedAt?: string;
   approvedBy?: string;
+  rejectedAt?: string;
+  rejectedBy?: string;
   rejectedReason?: string;
   media: MediaItem[];
   tags: string[];
@@ -68,8 +74,10 @@ export interface RundownItem {
   durationSecs: number;
   startTime?: string;
   notes?: string;
-  status: 'pendiente' | 'al_aire' | 'emitido';
+  status: RundownItemStatus;
 }
+
+export type RundownItemStatus = 'pendiente' | 'al_aire' | 'emitido';
 
 export interface Rundown {
   id: string;
@@ -77,7 +85,6 @@ export interface Rundown {
   date: string;
   channel: string;
   items: RundownItem[];
-  totalDurationSecs: number;
   status: 'borrador' | 'activo' | 'archivado';
 }
 

@@ -118,7 +118,6 @@ export const MOCK_RUNDOWN: Rundown = {
   date: '2026-06-05',
   channel: 'Canal 5',
   status: 'activo',
-  totalDurationSecs: 1800,
   items: [
     { id: 'ri1', order: 1, type: 'apertura', durationSecs: 30, notes: 'Cortinilla de apertura + saludo conductores', status: 'emitido', startTime: '20:00:00' },
     { id: 'ri2', order: 2, type: 'nota', noteId: 'n2', noteTitle: 'Índice de inflación baja por tercer mes consecutivo', presenter: 'Sofía Torres', durationSecs: 75, status: 'emitido', startTime: '20:00:30' },
