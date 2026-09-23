@@ -28,8 +28,12 @@ export interface MediaItem {
   id: string;
   name: string;
   type: 'image' | 'video' | 'audio';
+  /** URL para mostrar (firmada y temporal cuando viene de Supabase Storage). */
   url: string;
+  storagePath?: string;
+  mimeType?: string;
   size: number;
+  uploadedById?: string;
   uploadedBy: string;
   uploadedAt: string;
 }
@@ -49,6 +53,8 @@ export interface Note {
   updatedAt: string;
   approvedAt?: string;
   approvedBy?: string;
+  rejectedAt?: string;
+  rejectedBy?: string;
   rejectedReason?: string;
   media: MediaItem[];
   tags: string[];
@@ -64,21 +70,40 @@ export interface RundownItem {
   type: RundownItemType;
   noteId?: string;
   noteTitle?: string;
+  presenterId?: string;
   presenter?: string;
   durationSecs: number;
+  /** Obsoleto: la hora de inicio se calcula (ver lib/rundownTiming). */
   startTime?: string;
   notes?: string;
-  status: 'pendiente' | 'al_aire' | 'emitido';
+  status: RundownItemStatus;
 }
+
+export type RundownItemStatus = 'pendiente' | 'al_aire' | 'emitido';
 
 export interface Rundown {
   id: string;
   title: string;
   date: string;
   channel: string;
+  /** Hora de salida al aire, HH:MM:SS. */
+  airTime?: string;
+  plannedDurationSecs: number;
   items: RundownItem[];
-  totalDurationSecs: number;
-  status: 'borrador' | 'activo' | 'archivado';
+  status: RundownStatus;
+  archivedAt?: string;
+  archivedBy?: string;
+}
+
+export type RundownStatus = 'borrador' | 'activo' | 'archivado';
+
+export interface RundownSummary {
+  id: string;
+  title: string;
+  date: string;
+  channel: string;
+  status: RundownStatus;
+  archivedAt?: string;
 }
 
 export interface ApprovalAction {

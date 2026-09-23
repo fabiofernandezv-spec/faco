@@ -2,11 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, CheckSquare, Tv2,
-  Radio, ImageIcon, ChevronRight, ChevronUp, Users,
+  Radio, ImageIcon, ChevronRight, ChevronUp, Users, LogOut, FlaskConical, UserCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { useStore } from '../store/useStore';
-import { MOCK_USERS } from '../data/mockData';
+import { useStore, useCurrentUser } from '../store/useStore';
+import { canManageUsers } from '../lib/permissions';
 
 const NAV = [
   { to: '/',            label: 'Dashboard',      icon: LayoutDashboard },
@@ -17,7 +17,7 @@ const NAV = [
   { to: '/medios',      label: 'Medios',         icon: ImageIcon },
 ];
 
-const ROLE_LABELS: Record<string, string> = {
+export const ROLE_LABELS: Record<string, string> = {
   redactor:   'Redactor/a',
   editor:     'Editor/a',
   director:   'Director/a',
@@ -33,8 +33,14 @@ const ROLE_COLORS: Record<string, string> = {
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
-  const currentUser  = useStore((s) => s.currentUser);
-  const setCurrentUser = useStore((s) => s.setCurrentUser);
+  const currentUser  = useCurrentUser();
+  const demo         = useStore((s) => s.demo);
+  const profiles     = useStore((s) => s.profiles);
+  const setDemoUser  = useStore((s) => s.setDemoUser);
+  const signOut      = useStore((s) => s.signOut);
+  const nav = canManageUsers(currentUser)
+    ? [...NAV, { to: '/equipo', label: 'Equipo', icon: Users }]
+    : NAV;
   const pendingCount = useStore((s) =>
     s.notes.filter((n) => n.status === 'en_revision').length
   );
@@ -66,7 +72,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-          {NAV.map(({ to, label, icon: Icon }) => {
+          {nav.map(({ to, label, icon: Icon }) => {
             const active = pathname === to || (to !== '/' && pathname.startsWith(to));
             return (
               <Link
@@ -92,17 +98,48 @@ export function Layout({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        {/* User switcher */}
+        {demo && (
+          <div className="mx-3 mb-2 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            <FlaskConical className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+            <span>Modo demo: datos locales en este navegador, sin autenticación.</span>
+          </div>
+        )}
+
+        {/* User menu */}
         <div ref={menuRef} className="relative border-t border-gray-200">
-          {showUserMenu && (
+          {showUserMenu && !demo && (
             <div className="absolute bottom-full left-0 right-0 mb-1 mx-2 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-50">
+              <Link
+                to="/cuenta"
+                onClick={() => setShowUserMenu(false)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 border-b border-gray-100"
+              >
+                <UserCircle className="h-4 w-4" /> Mi cuenta
+              </Link>
+              <button
+                onClick={() => { setShowUserMenu(false); void signOut(); }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-red-600 hover:bg-red-50"
+              >
+                <LogOut className="h-4 w-4" /> Cerrar sesión
+              </button>
+            </div>
+          )}
+          {showUserMenu && demo && (
+            <div className="absolute bottom-full left-0 right-0 mb-1 mx-2 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-50">
+              <Link
+                to="/cuenta"
+                onClick={() => setShowUserMenu(false)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 border-b border-gray-100"
+              >
+                <UserCircle className="h-4 w-4" /> Mi cuenta
+              </Link>
               <p className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100 flex items-center gap-1">
-                <Users className="h-3 w-3" /> Cambiar usuario
+                <Users className="h-3 w-3" /> Cambiar usuario (demo)
               </p>
-              {MOCK_USERS.map((u) => (
+              {profiles.map((u) => (
                 <button
                   key={u.id}
-                  onClick={() => { setCurrentUser(u); setShowUserMenu(false); }}
+                  onClick={() => { setDemoUser(u); setShowUserMenu(false); }}
                   className={clsx(
                     'w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left transition-colors hover:bg-gray-50',
                     u.id === currentUser.id && 'bg-brand-50'
