@@ -67,6 +67,9 @@ begin
   if new.id <> old.id then
     raise exception 'No se puede cambiar el id del perfil';
   end if;
+  -- Nombre recortado (el CHECK 1-120 rechaza vacíos) y fecha de alta inmutable.
+  new.full_name  := trim(new.full_name);
+  new.created_at := old.created_at;
   -- Sin JWT (SQL Editor / service role): administración directa permitida.
   if auth.uid() is null then
     return new;

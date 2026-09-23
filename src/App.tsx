@@ -10,6 +10,8 @@ import { Teleprompter } from './pages/Teleprompter';
 import { MediaLibrary } from './pages/MediaLibrary';
 import { Team } from './pages/Team';
 import { Login } from './pages/Login';
+import { ResetPassword } from './pages/ResetPassword';
+import { Account } from './pages/Account';
 import { useStore } from './store/useStore';
 
 // El editor (TipTap) es pesado: se carga solo al abrir una nota.
@@ -19,13 +21,18 @@ function AppRoutes() {
   const init        = useStore((s) => s.init);
   const authReady   = useStore((s) => s.authReady);
   const currentUser = useStore((s) => s.currentUser);
+  const recovery    = useStore((s) => s.recovery);
+  const loginMode   = useStore((s) => s.loginMode);
 
   useEffect(() => { void init(); }, [init]);
+
+  // El enlace de recuperación se atiende antes que el login (y aunque haya sesión).
+  if (recovery) return <ResetPassword />;
 
   if (!authReady) {
     return <div className="min-h-screen flex items-center justify-center text-sm text-gray-400">Cargando…</div>;
   }
-  if (!currentUser) return <Login />;
+  if (!currentUser) return <Login key={loginMode} initialMode={loginMode} />;
 
   return (
     <Layout>
@@ -39,6 +46,7 @@ function AppRoutes() {
         <Route path="/teleprompter"  element={<Teleprompter />} />
         <Route path="/medios"        element={<MediaLibrary />} />
         <Route path="/equipo"        element={<Team />} />
+        <Route path="/cuenta"        element={<Account />} />
         <Route path="*"              element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

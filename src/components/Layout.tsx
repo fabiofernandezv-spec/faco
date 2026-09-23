@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, CheckSquare, Tv2,
-  Radio, ImageIcon, ChevronRight, ChevronUp, Users, LogOut, FlaskConical,
+  Radio, ImageIcon, ChevronRight, ChevronUp, Users, LogOut, FlaskConical, UserCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useStore, useCurrentUser } from '../store/useStore';
@@ -109,6 +109,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div ref={menuRef} className="relative border-t border-gray-200">
           {showUserMenu && !demo && (
             <div className="absolute bottom-full left-0 right-0 mb-1 mx-2 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-50">
+              <Link
+                to="/cuenta"
+                onClick={() => setShowUserMenu(false)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 border-b border-gray-100"
+              >
+                <UserCircle className="h-4 w-4" /> Mi cuenta
+              </Link>
               <button
                 onClick={() => { setShowUserMenu(false); void signOut(); }}
                 className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-red-600 hover:bg-red-50"
@@ -119,6 +126,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
           )}
           {showUserMenu && demo && (
             <div className="absolute bottom-full left-0 right-0 mb-1 mx-2 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-50">
+              <Link
+                to="/cuenta"
+                onClick={() => setShowUserMenu(false)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 border-b border-gray-100"
+              >
+                <UserCircle className="h-4 w-4" /> Mi cuenta
+              </Link>
               <p className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100 flex items-center gap-1">
                 <Users className="h-3 w-3" /> Cambiar usuario (demo)
               </p>

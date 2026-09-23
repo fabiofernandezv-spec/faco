@@ -52,12 +52,26 @@ Para actualizar Spec Kit:
    activar confirmación de correo y, si el equipo es cerrado, desactivar
    registros públicos (**Allow new users to sign up**) y crear usuarios desde
    el panel.
-5. Regístrate en la app y conviértete en director desde SQL Editor:
+5. En **Authentication → URL Configuration**: *Site URL* = el dominio de la app
+   y en *Redirect URLs* agrega `https://<tu-dominio>/restablecer` (para
+   desarrollo también `http://localhost:5173/restablecer`). En
+   **Authentication → Providers → Email** fija la longitud mínima de contraseña
+   en **10**.
+6. Regístrate en la app y conviértete en director desde SQL Editor:
    ```sql
    update profiles set role = 'director'
     where id = (select id from auth.users where email = 'tu-correo@ejemplo.com');
    ```
-6. Desde la página **Equipo** el director asigna los roles al resto.
+7. Desde la página **Equipo** el director asigna los roles al resto.
+
+### Cuenta y contraseña
+
+- **¿Olvidaste tu contraseña?** en el login envía un enlace; al abrirlo se fija
+  una contraseña nueva en `/restablecer`. El mensaje es el mismo exista o no el
+  correo.
+- **Mi cuenta** (menú de usuario): cambiar el nombre visible y la contraseña
+  (pide la actual y cierra las sesiones en otros equipos). El rol solo lo
+  cambia un director.
 
 ### Modelo de seguridad
 

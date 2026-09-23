@@ -8,6 +8,8 @@ import type { NoteContent } from '../lib/notesService';
 import type { RundownInput, SegmentChanges, SegmentInput } from '../lib/rundownService';
 import { applySegmentStatus, validateRundownInput, validateSegment } from '../lib/rundownState';
 import { parseClock } from '../lib/rundownTiming';
+import { validateDisplayName } from '../lib/accountValidation';
+import { RESET_PATH } from '../lib/profilesService';
 import { errorMessage } from '../lib/errors';
 import { sanitizeHtml, normalizeBody } from '../lib/sanitize';
 import { transitionNote } from '../lib/noteWorkflow';
@@ -20,6 +22,12 @@ interface Store {
   demo: boolean;
   authReady: boolean;
   currentUser: User | null;
+  /** Correo de la sesión (Supabase); null en demo. */
+  accountEmail: string | null;
+  /** Hay una sesión de recuperación de contraseña pendiente. */
+  recovery: boolean;
+  /** Modo con el que se abre el login (p. ej. tras un enlace vencido). */
+  loginMode: 'login' | 'forgot';
   notes: Note[];
   /** Rundown seleccionado (con segmentos). */
   rundown: Rundown | null;
@@ -39,6 +47,12 @@ interface Store {
   signIn: (email: string, password: string) => Promise<boolean>;
   signUp: (email: string, password: string, fullName: string) => Promise<boolean>;
   signOut: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<boolean>;
+  completePasswordReset: (password: string, confirm: string) => Promise<boolean>;
+  /** Sale de la recuperación; con `requestNew` el login se abre en "recuperar contraseña". */
+  cancelRecovery: (requestNew?: boolean) => void;
+  changePassword: (current: string, next: string, confirm: string) => Promise<boolean>;
+  updateOwnName: (name: string) => Promise<boolean>;
 
   refreshNotes: () => Promise<void>;
   refreshRundown: () => Promise<void>;
@@ -148,13 +162,13 @@ export const useStore = create<Store>()(
 
       async function loadSession(userId: string | null) {
         if (!userId) {
-          set({ currentUser: null, notes: [], rundown: null, rundowns: [], media: [], profiles: [], presenters: [] });
+          set({ currentUser: null, accountEmail: null, notes: [], rundown: null, rundowns: [], media: [], profiles: [], presenters: [] });
           unsubscribeRealtime();
           return;
         }
         const profile = await profilesApi.fetchProfile(userId);
         if (!profile) throw new Error('Tu usuario no tiene perfil. Contacta a un director.');
-        set({ currentUser: profile });
+        set({ currentUser: profile, accountEmail: await profilesApi.getAccountEmail() });
         await Promise.all([get().refreshNotes(), get().refreshRundown(), get().refreshMedia()]);
         subscribeRealtime();
       }
@@ -188,6 +202,9 @@ export const useStore = create<Store>()(
         demo: !supabaseEnabled,
         authReady: !supabaseEnabled,
         currentUser: supabaseEnabled ? null : MOCK_USERS[2],
+        accountEmail: null,
+        loginMode: 'login',
+        recovery: supabaseEnabled && typeof window !== 'undefined' && window.location.pathname === RESET_PATH,
         notes:   supabaseEnabled ? [] : MOCK_NOTES,
         rundown: supabaseEnabled ? null : MOCK_RUNDOWN,
         rundowns: supabaseEnabled ? [] : [summarize(MOCK_RUNDOWN)],
@@ -209,10 +226,9 @@ export const useStore = create<Store>()(
             set({ authReady: true, notes: get().notes.map((n) => ({ ...n, body: normalizeBody(n.body) })) });
             return;
           }
-          const { data } = await supabase.auth.getSession();
-          await run(() => loadSession(data.session?.user.id ?? null));
-          set({ authReady: true });
+          // Suscribirse antes de leer la sesión para no perder PASSWORD_RECOVERY.
           supabase.auth.onAuthStateChange((event, session) => {
+            if (event === 'PASSWORD_RECOVERY') set({ recovery: true });
             if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
               const uid = session?.user.id ?? null;
               if (uid === get().currentUser?.id && event !== 'USER_UPDATED') return;
@@ -220,6 +236,9 @@ export const useStore = create<Store>()(
               setTimeout(() => void run(() => loadSession(uid)), 0);
             }
           });
+          const { data } = await supabase.auth.getSession();
+          await run(() => loadSession(data.session?.user.id ?? null));
+          set({ authReady: true });
         },
 
         setError: (msg) => set({ error: msg }),
@@ -231,6 +250,38 @@ export const useStore = create<Store>()(
 
         signIn: (email, password) => run(() => profilesApi.signIn(email, password)),
         signUp: (email, password, fullName) => run(() => profilesApi.signUp(email, password, fullName)),
+        requestPasswordReset: (email) => run(() => profilesApi.requestPasswordReset(email)),
+
+        completePasswordReset: (password, confirm) => run(async () => {
+          await profilesApi.completePasswordReset(password, confirm);
+          set({ recovery: false });
+          const { data } = await supabase!.auth.getSession();
+          await loadSession(data.session?.user.id ?? null);
+        }),
+
+        cancelRecovery: (requestNew = false) => set({ recovery: false, loginMode: requestNew ? 'forgot' : 'login' }),
+
+        changePassword: (current, next, confirm) => run(async () => {
+          if (get().demo) throw new Error('En modo demo la contraseña no se gestiona: usa una cuenta real.');
+          const email = get().accountEmail;
+          if (!email) throw new Error('No se pudo obtener el correo de tu cuenta. Vuelve a iniciar sesión.');
+          await profilesApi.changePassword(email, current, next, confirm);
+        }),
+
+        updateOwnName: (name) => run(async () => {
+          const user = requireUser();
+          const invalid = validateDisplayName(name);
+          if (invalid) throw new Error(invalid);
+          const updated = get().demo
+            ? { ...user, name: name.trim() }
+            : await profilesApi.updateOwnName(user.id, name);
+          set((s) => ({
+            currentUser: updated,
+            profiles: s.profiles.map((p) => (p.id === updated.id ? updated : p)),
+            presenters: s.presenters.map((p) => (p.id === updated.id ? updated : p)),
+          }));
+        }),
+
         signOut: async () => {
           await run(() => profilesApi.signOut());
         },
@@ -561,6 +612,7 @@ export const useStore = create<Store>()(
         s.demo
           ? {
               currentUser: s.currentUser,
+              profiles: s.profiles,
               notes: s.notes,
               rundown: s.rundown,
               demoRundowns: s.demoRundowns,

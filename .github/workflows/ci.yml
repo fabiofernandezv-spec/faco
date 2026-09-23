@@ -50,3 +50,5 @@ jobs:
           psql -v ON_ERROR_STOP=1 -q -f supabase/schema.sql
       - name: Pruebas de comportamiento del rundown
         run: psql -v ON_ERROR_STOP=1 -q -f supabase/tests/rundown_behavior.sql
+      - name: Pruebas de comportamiento de cuenta
+        run: psql -v ON_ERROR_STOP=1 -q -f supabase/tests/account_behavior.sql
