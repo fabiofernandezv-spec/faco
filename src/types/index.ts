@@ -70,8 +70,10 @@ export interface RundownItem {
   type: RundownItemType;
   noteId?: string;
   noteTitle?: string;
+  presenterId?: string;
   presenter?: string;
   durationSecs: number;
+  /** Obsoleto: la hora de inicio se calcula (ver lib/rundownTiming). */
   startTime?: string;
   notes?: string;
   status: RundownItemStatus;
@@ -84,8 +86,24 @@ export interface Rundown {
   title: string;
   date: string;
   channel: string;
+  /** Hora de salida al aire, HH:MM:SS. */
+  airTime?: string;
+  plannedDurationSecs: number;
   items: RundownItem[];
-  status: 'borrador' | 'activo' | 'archivado';
+  status: RundownStatus;
+  archivedAt?: string;
+  archivedBy?: string;
+}
+
+export type RundownStatus = 'borrador' | 'activo' | 'archivado';
+
+export interface RundownSummary {
+  id: string;
+  title: string;
+  date: string;
+  channel: string;
+  status: RundownStatus;
+  archivedAt?: string;
 }
 
 export interface ApprovalAction {

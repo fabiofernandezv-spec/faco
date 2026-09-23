@@ -282,32 +282,179 @@ create table if not exists rundown_items (
 );
 create index if not exists rundown_items_rundown_idx on rundown_items (rundown_id, order_num);
 
--- Presentadores solo cambian el estado; las notas agregadas deben estar
--- aprobadas (o publicadas) y marcadas para TV.
+-- Columnas añadidas por 001-rundown-completo (idempotente).
+alter table rundowns add column if not exists air_time time;
+alter table rundowns add column if not exists planned_duration_secs int not null default 1800;
+alter table rundowns add column if not exists archived_at timestamptz;
+alter table rundowns add column if not exists archived_by text;
+do $$ begin
+  alter table rundowns add constraint rundowns_planned_duration_check
+    check (planned_duration_secs between 60 and 21600);
+exception when duplicate_object then null; end $$;
+
+alter table rundown_items add column if not exists presenter_id uuid references profiles(id) on delete set null;
+comment on column rundown_items.start_time is 'Obsoleto: la hora de inicio se calcula en el cliente';
+
+-- Como máximo un segmento al aire por rundown, y cada nota una sola vez.
+create unique index if not exists rundown_items_one_on_air
+  on rundown_items (rundown_id) where status = 'al_aire';
+create unique index if not exists rundown_items_note_unique
+  on rundown_items (rundown_id, note_id) where note_id is not null;
+
+-- Rundowns: autoría y archivado los fija la base; un rundown archivado solo
+-- admite volver a activo.
+create or replace function guard_rundown()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    new.created_by  := auth.uid();
+    new.created_at  := now();
+    new.archived_at := null;
+    new.archived_by := null;
+    if new.status = 'archivado' then
+      new.status := 'activo';
+    end if;
+    return new;
+  end if;
+
+  new.id         := old.id;
+  new.created_by := old.created_by;
+  new.created_at := old.created_at;
+
+  if old.status = 'archivado' then
+    if new.status = 'archivado'
+       or (new.title, new.air_date, new.channel, new.air_time, new.planned_duration_secs)
+          is distinct from
+          (old.title, old.air_date, old.channel, old.air_time, old.planned_duration_secs) then
+      raise exception 'El rundown está archivado: es de solo lectura (reactívalo para editarlo)';
+    end if;
+    new.archived_at := null;
+    new.archived_by := null;
+  elsif new.status = 'archivado' then
+    new.archived_at := now();
+    new.archived_by := current_app_name();
+  else
+    new.archived_at := old.archived_at;
+    new.archived_by := old.archived_by;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists rundowns_guard on rundowns;
+create trigger rundowns_guard
+  before insert or update on rundowns
+  for each row execute function guard_rundown();
+
+-- Segmentos:
+--   * rundown archivado → solo lectura;
+--   * presentadores solo cambian el estado;
+--   * notas: aprobadas/publicadas para TV, sin repetir; título copiado;
+--   * presentador: debe tener rol presentador; nombre copiado;
+--   * un solo segmento al aire: el anterior pasa a emitido (atómico);
+--   * no se quita el segmento al aire.
 create or replace function guard_rundown_item()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
-  v_role text := current_app_role();
+  v_role   text := current_app_role();
+  v_status text;
 begin
-  if tg_op = 'UPDATE' and v_role = 'presentador' then
-    if (new.rundown_id, new.order_num, new.type, new.note_id, new.note_title, new.presenter,
-        new.duration_secs, new.start_time, new.notes)
-       is distinct from
-       (old.rundown_id, old.order_num, old.type, old.note_id, old.note_title, old.presenter,
-        old.duration_secs, old.start_time, old.notes) then
-      raise exception 'Los presentadores solo pueden cambiar el estado del segmento';
-    end if;
+  -- Acciones referenciales (nota o perfil eliminados): solo ponen a null la
+  -- referencia y conservan el nombre/título mostrado. Se permiten siempre.
+  if tg_op = 'UPDATE'
+     and (new.note_id is null or new.presenter_id is null)
+     and (new.id, new.rundown_id, new.order_num, new.type, new.note_title, new.presenter,
+          new.duration_secs, new.start_time, new.notes, new.status)
+         is not distinct from
+         (old.id, old.rundown_id, old.order_num, old.type, old.note_title, old.presenter,
+          old.duration_secs, old.start_time, old.notes, old.status)
+     and (new.note_id is not distinct from old.note_id or new.note_id is null)
+     and (new.presenter_id is not distinct from old.presenter_id or new.presenter_id is null)
+     and pg_trigger_depth() > 1 then
+    return new;
   end if;
 
+  -- Borrado en cascada del rundown completo (lo hace un director).
+  if tg_op = 'DELETE' and pg_trigger_depth() > 1 then
+    return old;
+  end if;
+
+  select status into v_status from rundowns
+   where id = case when tg_op = 'DELETE' then old.rundown_id else new.rundown_id end;
+  if v_status = 'archivado' then
+    raise exception 'El rundown está archivado: es de solo lectura (reactívalo para editarlo)';
+  end if;
+
+  if tg_op = 'DELETE' then
+    if old.status = 'al_aire' then
+      raise exception 'No se puede quitar el segmento que está al aire';
+    end if;
+    return old;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if new.rundown_id <> old.rundown_id then
+      raise exception 'No se puede mover un segmento a otro rundown';
+    end if;
+    if v_role = 'presentador'
+       and (new.order_num, new.type, new.note_id, new.presenter_id, new.duration_secs,
+            new.start_time, new.notes)
+           is distinct from
+           (old.order_num, old.type, old.note_id, old.presenter_id, old.duration_secs,
+            old.start_time, old.notes) then
+      raise exception 'Los presentadores solo pueden cambiar el estado del segmento';
+    end if;
+  else
+    new.status := 'pendiente';   -- un segmento nuevo nunca entra al aire
+  end if;
+
+  -- Notas
+  if new.type <> 'nota' then
+    new.note_id := null;
+    new.note_title := null;
+  elsif tg_op = 'INSERT' and new.note_id is null then
+    raise exception 'Un segmento de tipo nota requiere una nota';
+  end if;
   if new.note_id is not null and (tg_op = 'INSERT' or new.note_id is distinct from old.note_id) then
     if not exists (
       select 1 from notes
-      where id = new.note_id and for_tv and status in ('aprobada', 'publicada')
+       where id = new.note_id and for_tv and status in ('aprobada', 'publicada')
     ) then
       raise exception 'Solo se pueden agregar notas aprobadas y marcadas para TV';
     end if;
+    if exists (
+      select 1 from rundown_items
+       where rundown_id = new.rundown_id and note_id = new.note_id and id <> new.id
+    ) then
+      raise exception 'La nota ya está en el rundown';
+    end if;
     select title into new.note_title from notes where id = new.note_id;
+  elsif tg_op = 'UPDATE' and new.note_id is not null then
+    new.note_title := old.note_title;
   end if;
+
+  -- Presentador (el nombre lo fija la base)
+  if tg_op = 'INSERT' or new.presenter_id is distinct from old.presenter_id then
+    if new.presenter_id is null then
+      new.presenter := null;
+    else
+      select full_name into new.presenter from profiles
+       where id = new.presenter_id and role = 'presentador';
+      if not found then
+        raise exception 'El presentador asignado no tiene rol de presentador';
+      end if;
+    end if;
+  else
+    new.presenter := old.presenter;
+  end if;
+
+  -- Un solo segmento al aire: bloquear el rundown para serializar relevos.
+  if tg_op = 'UPDATE' and new.status = 'al_aire' and old.status <> 'al_aire' then
+    perform 1 from rundowns where id = new.rundown_id for update;
+    update rundown_items set status = 'emitido'
+     where rundown_id = new.rundown_id and status = 'al_aire' and id <> new.id;
+  end if;
+
   return new;
 end;
 $$;
@@ -315,6 +462,11 @@ $$;
 drop trigger if exists rundown_items_guard on rundown_items;
 create trigger rundown_items_guard
   before insert or update on rundown_items
+  for each row execute function guard_rundown_item();
+
+drop trigger if exists rundown_items_guard_delete on rundown_items;
+create trigger rundown_items_guard_delete
+  before delete on rundown_items
   for each row execute function guard_rundown_item();
 
 -- Reordenar en una sola llamada (security invoker: aplica RLS).
@@ -404,11 +556,17 @@ drop policy if exists "note events read" on note_events;
 create policy "note events read" on note_events for select to authenticated using (true);
 
 -- rundowns
-drop policy if exists "rundowns read"  on rundowns;
-drop policy if exists "rundowns write" on rundowns;
-create policy "rundowns read"  on rundowns for select to authenticated using (true);
-create policy "rundowns write" on rundowns for all    to authenticated
+drop policy if exists "rundowns read"   on rundowns;
+drop policy if exists "rundowns write"  on rundowns;
+drop policy if exists "rundowns insert" on rundowns;
+drop policy if exists "rundowns update" on rundowns;
+drop policy if exists "rundowns delete" on rundowns;
+create policy "rundowns read"   on rundowns for select to authenticated using (true);
+create policy "rundowns insert" on rundowns for insert to authenticated with check (is_editor());
+create policy "rundowns update" on rundowns for update to authenticated
   using (is_editor()) with check (is_editor());
+create policy "rundowns delete" on rundowns for delete to authenticated
+  using (current_app_role() = 'director');
 
 -- rundown_items
 drop policy if exists "rundown items read"   on rundown_items;

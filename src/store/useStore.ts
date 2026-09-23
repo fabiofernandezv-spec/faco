@@ -1,16 +1,19 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import type { MediaItem, Note, Rundown, RundownItemStatus, User, UserRole } from '../types';
+import type { MediaItem, Note, Rundown, RundownItemStatus, RundownSummary, User, UserRole } from '../types';
 import { MOCK_MEDIA, MOCK_NOTES, MOCK_RUNDOWN, MOCK_USERS } from '../data/mockData';
 import { supabase, supabaseEnabled, notesApi, rundownApi, mediaApi, profilesApi } from '../lib/db';
 import type { NoteContent } from '../lib/notesService';
+import type { RundownInput, SegmentChanges, SegmentInput } from '../lib/rundownService';
+import { applySegmentStatus, validateRundownInput, validateSegment } from '../lib/rundownState';
+import { parseClock } from '../lib/rundownTiming';
 import { errorMessage } from '../lib/errors';
 import { sanitizeHtml, normalizeBody } from '../lib/sanitize';
 import { transitionNote } from '../lib/noteWorkflow';
 import {
   canCreateNote, canDeleteMedia, canDeleteNote, canEditNote, canManageRundown,
-  canChangeRundownStatus, canManageUsers, canReviewNotes, canUploadMedia,
+  canChangeSegmentStatus, canEditRundown, canManageUsers, canReviewNotes, canUploadMedia,
 } from '../lib/permissions';
 
 interface Store {
@@ -18,7 +21,14 @@ interface Store {
   authReady: boolean;
   currentUser: User | null;
   notes: Note[];
+  /** Rundown seleccionado (con segmentos). */
   rundown: Rundown | null;
+  /** Listado resumido: activos y archivados, más recientes primero. */
+  rundowns: RundownSummary[];
+  selectedRundownId: string | null;
+  /** Modo demo: todos los rundowns locales. */
+  demoRundowns: Rundown[];
+  presenters: User[];
   media: MediaItem[];
   profiles: User[];
   error: string | null;
@@ -33,6 +43,8 @@ interface Store {
   refreshNotes: () => Promise<void>;
   refreshRundown: () => Promise<void>;
   refreshMedia: () => Promise<void>;
+  refreshPresenters: () => Promise<void>;
+  selectRundown: (id: string | null) => Promise<void>;
   refreshProfiles: () => Promise<void>;
 
   /** Crea (id = null) o guarda una nota; `submit` la envía a revisión en la misma operación. */
@@ -41,7 +53,12 @@ interface Store {
   approveNote: (id: string) => Promise<boolean>;
   rejectNote: (id: string, reason: string) => Promise<boolean>;
 
-  createRundown: (input: { title: string; channel: string; date: string }) => Promise<boolean>;
+  createRundown: (input: RundownInput) => Promise<boolean>;
+  updateRundown: (changes: Partial<RundownInput>) => Promise<boolean>;
+  archiveRundown: () => Promise<boolean>;
+  reactivateRundown: () => Promise<boolean>;
+  addSegment: (input: Omit<SegmentInput, 'order'>) => Promise<boolean>;
+  updateSegment: (itemId: string, changes: SegmentChanges) => Promise<boolean>;
   addRundownItem: (note: Note) => Promise<boolean>;
   setRundownItemStatus: (itemId: string, status: RundownItemStatus) => Promise<boolean>;
   moveRundownItem: (index: number, dir: -1 | 1) => Promise<boolean>;
@@ -95,9 +112,43 @@ export const useStore = create<Store>()(
         return note;
       }
 
+      const summarize = (r: Rundown): RundownSummary => ({
+        id: r.id, title: r.title, date: r.date, channel: r.channel, status: r.status, archivedAt: r.archivedAt,
+      });
+
+      const sortSummaries = (list: RundownSummary[]) =>
+        [...list].sort((a, b) => b.date.localeCompare(a.date));
+
+      /** Rundown seleccionado editable por el usuario actual (o error). */
+      function editableRundown(): Rundown {
+        const rundown = get().rundown;
+        if (!rundown) throw new Error('No hay un rundown seleccionado.');
+        if (rundown.status === 'archivado') {
+          throw new Error('El rundown está archivado: es de solo lectura (reactívalo para editarlo).');
+        }
+        assert(canEditRundown(requireUser(), rundown));
+        return rundown;
+      }
+
+      /** Modo demo: guarda el rundown en la lista local y lo deja seleccionado. */
+      function commitDemo(r: Rundown) {
+        const demoRundowns = [r, ...get().demoRundowns.filter((x) => x.id !== r.id)];
+        set({
+          demoRundowns,
+          rundowns: sortSummaries(demoRundowns.map(summarize)),
+          rundown: r,
+          selectedRundownId: r.id,
+        });
+      }
+
+      function pickDefault(list: RundownSummary[], preferred: string | null): string | null {
+        if (preferred && list.some((r) => r.id === preferred)) return preferred;
+        return list.find((r) => r.status === 'activo')?.id ?? null;
+      }
+
       async function loadSession(userId: string | null) {
         if (!userId) {
-          set({ currentUser: null, notes: [], rundown: null, media: [], profiles: [] });
+          set({ currentUser: null, notes: [], rundown: null, rundowns: [], media: [], profiles: [], presenters: [] });
           unsubscribeRealtime();
           return;
         }
@@ -139,6 +190,10 @@ export const useStore = create<Store>()(
         currentUser: supabaseEnabled ? null : MOCK_USERS[2],
         notes:   supabaseEnabled ? [] : MOCK_NOTES,
         rundown: supabaseEnabled ? null : MOCK_RUNDOWN,
+        rundowns: supabaseEnabled ? [] : [summarize(MOCK_RUNDOWN)],
+        selectedRundownId: supabaseEnabled ? null : MOCK_RUNDOWN.id,
+        demoRundowns: supabaseEnabled ? [] : [MOCK_RUNDOWN],
+        presenters: supabaseEnabled ? [] : MOCK_USERS.filter((u) => u.role === 'presentador'),
         media:   supabaseEnabled ? [] : MOCK_MEDIA,
         profiles: supabaseEnabled ? [] : MOCK_USERS,
         error: null,
@@ -146,7 +201,10 @@ export const useStore = create<Store>()(
         init: async () => {
           if (initialized) return;
           initialized = true;
-          try { localStorage.removeItem('mesa-central-store'); } catch { /* sin storage */ }
+          try {
+            localStorage.removeItem('mesa-central-store');
+            localStorage.removeItem('mesa-central-demo-v2');
+          } catch { /* sin storage */ }
           if (!supabase) {
             set({ authReady: true, notes: get().notes.map((n) => ({ ...n, body: normalizeBody(n.body) })) });
             return;
@@ -182,8 +240,36 @@ export const useStore = create<Store>()(
           await run(async () => set({ notes: await notesApi.fetchNotes() }));
         },
         refreshRundown: async () => {
-          if (get().demo) return;
-          await run(async () => set({ rundown: await rundownApi.fetchActiveRundown() }));
+          if (get().demo) {
+            const list = sortSummaries(get().demoRundowns.map(summarize));
+            const id = pickDefault(list, get().selectedRundownId);
+            set({ rundowns: list, selectedRundownId: id, rundown: get().demoRundowns.find((r) => r.id === id) ?? null });
+            return;
+          }
+          await run(async () => {
+            const list = await rundownApi.fetchRundownSummaries();
+            const id = pickDefault(list, get().selectedRundownId);
+            set({ rundowns: list, selectedRundownId: id, rundown: id ? await rundownApi.fetchRundown(id) : null });
+          });
+        },
+        refreshPresenters: async () => {
+          if (get().demo) {
+            set({ presenters: get().profiles.filter((u) => u.role === 'presentador') });
+            return;
+          }
+          await run(async () => set({ presenters: await rundownApi.fetchPresenters() }));
+        },
+        selectRundown: async (id) => {
+          if (id === get().selectedRundownId && get().rundown?.id === id) return;
+          if (get().demo) {
+            set({ selectedRundownId: id, rundown: get().demoRundowns.find((r) => r.id === id) ?? null });
+            return;
+          }
+          await run(async () => {
+            const rundown = id ? await rundownApi.fetchRundown(id) : null;
+            if (id && !rundown) throw new Error('El rundown no existe.');
+            set({ selectedRundownId: id, rundown });
+          });
         },
         refreshMedia: async () => {
           if (get().demo) return;
@@ -262,69 +348,161 @@ export const useStore = create<Store>()(
 
         createRundown: (input) => run(async () => {
           assert(canManageRundown(requireUser()));
-          if (!input.title.trim()) throw new Error('El título es obligatorio.');
+          const invalid = validateRundownInput(input, parseClock);
+          if (invalid) throw new Error(invalid);
           if (get().demo) {
-            set({ rundown: { id: genId(), title: input.title.trim(), channel: input.channel.trim(), date: input.date, status: 'activo', items: [] } });
+            commitDemo({
+              id: genId(), title: input.title.trim(), channel: input.channel.trim(), date: input.date,
+              airTime: input.airTime || undefined, plannedDurationSecs: input.plannedDurationSecs,
+              status: 'activo', items: [],
+            });
             return;
           }
-          await rundownApi.createRundown(input);
+          const id = await rundownApi.createRundown(input);
+          set({ selectedRundownId: id });
           await get().refreshRundown();
         }),
 
-        addRundownItem: (note) => run(async () => {
-          assert(canManageRundown(requireUser()));
-          const rundown = get().rundown;
-          if (!rundown) throw new Error('No hay un rundown activo.');
-          if (!note.forTv || (note.status !== 'aprobada' && note.status !== 'publicada')) {
-            throw new Error('Solo se pueden agregar notas aprobadas y marcadas para TV.');
+        updateRundown: (changes) => run(async () => {
+          const rundown = editableRundown();
+          const invalid = validateRundownInput(changes, parseClock);
+          if (invalid) throw new Error(invalid);
+          if (get().demo) {
+            commitDemo({
+              ...rundown,
+              ...(changes.title !== undefined && { title: changes.title.trim() }),
+              ...(changes.channel !== undefined && { channel: changes.channel.trim() }),
+              ...(changes.date !== undefined && { date: changes.date }),
+              ...(changes.airTime !== undefined && { airTime: changes.airTime || undefined }),
+              ...(changes.plannedDurationSecs !== undefined && { plannedDurationSecs: changes.plannedDurationSecs }),
+            });
+            return;
           }
-          if (rundown.items.some((i) => i.noteId === note.id)) return;
-          const base = {
-            order: rundown.items.length + 1,
-            type: 'nota' as const,
-            noteId: note.id,
-            noteTitle: note.title,
-            durationSecs: note.durationSecs ?? 60,
-          };
-          const item = get().demo
-            ? { ...base, id: genId(), status: 'pendiente' as const }
-            : await rundownApi.insertRundownItem(rundown.id, base);
-          set((s) => (s.rundown ? { rundown: { ...s.rundown, items: [...s.rundown.items, item] } } : {}));
+          await rundownApi.updateRundown(rundown.id, changes);
+          await get().refreshRundown();
+        }),
+
+        archiveRundown: () => run(async () => {
+          const user = requireUser();
+          const rundown = get().rundown;
+          if (!rundown || rundown.status === 'archivado') return;
+          assert(canManageRundown(user));
+          if (get().demo) {
+            commitDemo({ ...rundown, status: 'archivado', archivedAt: now(), archivedBy: user.name });
+            return;
+          }
+          await rundownApi.archiveRundown(rundown.id);
+          await get().refreshRundown();
+        }),
+
+        reactivateRundown: () => run(async () => {
+          const rundown = get().rundown;
+          if (!rundown || rundown.status !== 'archivado') return;
+          assert(canManageRundown(requireUser()));
+          if (get().demo) {
+            commitDemo({ ...rundown, status: 'activo', archivedAt: undefined, archivedBy: undefined });
+            return;
+          }
+          await rundownApi.reactivateRundown(rundown.id);
+          await get().refreshRundown();
+        }),
+
+        addSegment: (input) => run(async () => {
+          const rundown = editableRundown();
+          const invalid = validateSegment(input);
+          if (invalid) throw new Error(invalid);
+          const base: SegmentInput = { ...input, order: rundown.items.length + 1 };
+          let item;
+          if (input.type === 'nota') {
+            const note = get().notes.find((n) => n.id === input.noteId);
+            if (!note || !note.forTv || (note.status !== 'aprobada' && note.status !== 'publicada')) {
+              throw new Error('Solo se pueden agregar notas aprobadas y marcadas para TV.');
+            }
+            if (rundown.items.some((i) => i.noteId === note.id)) throw new Error('La nota ya está en el rundown.');
+            if (get().demo) {
+              item = { ...base, id: genId(), status: 'pendiente' as const, noteTitle: note.title };
+            }
+          } else if (get().demo) {
+            item = { ...base, id: genId(), status: 'pendiente' as const, noteId: undefined };
+          }
+          if (get().demo && item) {
+            const presenter = get().presenters.find((p) => p.id === input.presenterId);
+            if (input.presenterId && !presenter) throw new Error('El presentador asignado no tiene rol de presentador.');
+            item = { ...item, presenter: presenter?.name, notes: input.notes?.trim() || undefined };
+          } else {
+            item = await rundownApi.insertSegment(rundown.id, base);
+          }
+          const next = { ...rundown, items: [...rundown.items, item] };
+          if (get().demo) commitDemo(next); else set({ rundown: next });
+        }),
+
+        updateSegment: (itemId, changes) => run(async () => {
+          const rundown = editableRundown();
+          const invalid = validateSegment({ durationSecs: changes.durationSecs, notes: changes.notes });
+          if (invalid) throw new Error(invalid);
+          let updated;
+          if (get().demo) {
+            const current = rundown.items.find((i) => i.id === itemId);
+            if (!current) throw new Error('El segmento no existe.');
+            updated = { ...current };
+            if (changes.durationSecs !== undefined) updated.durationSecs = changes.durationSecs;
+            if (changes.notes !== undefined) updated.notes = changes.notes.trim() || undefined;
+            if (changes.presenterId !== undefined) {
+              const presenter = get().presenters.find((p) => p.id === changes.presenterId);
+              if (changes.presenterId && !presenter) throw new Error('El presentador asignado no tiene rol de presentador.');
+              updated.presenterId = presenter?.id;
+              updated.presenter = presenter?.name;
+            }
+          } else {
+            updated = await rundownApi.updateSegment(itemId, changes);
+          }
+          const next = { ...rundown, items: rundown.items.map((i) => (i.id === itemId ? updated : i)) };
+          if (get().demo) commitDemo(next); else set({ rundown: next });
+        }),
+
+        addRundownItem: (note) => get().addSegment({
+          type: 'nota', noteId: note.id, durationSecs: note.durationSecs ?? 60,
         }),
 
         setRundownItemStatus: (itemId, status) => run(async () => {
-          assert(canChangeRundownStatus(requireUser()));
-          if (!get().demo) await rundownApi.setRundownItemStatus(itemId, status);
-          set((s) => (s.rundown ? {
-            rundown: { ...s.rundown, items: s.rundown.items.map((i) => (i.id === itemId ? { ...i, status } : i)) },
-          } : {}));
+          const rundown = get().rundown;
+          if (!rundown) return;
+          if (rundown.status === 'archivado') {
+            throw new Error('El rundown está archivado: es de solo lectura (reactívalo para editarlo).');
+          }
+          assert(canChangeSegmentStatus(requireUser(), rundown));
+          const next = { ...rundown, items: applySegmentStatus(rundown.items, itemId, status) };
+          if (get().demo) { commitDemo(next); return; }
+          await rundownApi.setRundownItemStatus(itemId, status);
+          set({ rundown: next });
         }),
 
         moveRundownItem: (index, dir) => run(async () => {
-          assert(canManageRundown(requireUser()));
-          const rundown = get().rundown;
-          if (!rundown) return;
+          const rundown = editableRundown();
           const items = [...rundown.items];
           const swap = index + dir;
           if (swap < 0 || swap >= items.length) return;
           [items[index], items[swap]] = [items[swap], items[index]];
           const reordered = items.map((item, i) => ({ ...item, order: i + 1 }));
-          if (!get().demo) await rundownApi.reorderRundown(rundown.id, reordered.map((i) => i.id));
-          set({ rundown: { ...rundown, items: reordered } });
+          const next = { ...rundown, items: reordered };
+          if (get().demo) { commitDemo(next); return; }
+          await rundownApi.reorderRundown(rundown.id, reordered.map((i) => i.id));
+          set({ rundown: next });
         }),
 
         removeRundownItem: (itemId) => run(async () => {
-          assert(canManageRundown(requireUser()));
-          const rundown = get().rundown;
-          if (!rundown) return;
+          const rundown = editableRundown();
+          if (rundown.items.find((i) => i.id === itemId)?.status === 'al_aire') {
+            throw new Error('No se puede quitar el segmento que está al aire.');
+          }
           const items = rundown.items
             .filter((i) => i.id !== itemId)
             .map((item, idx) => ({ ...item, order: idx + 1 }));
-          if (!get().demo) {
-            await rundownApi.deleteRundownItem(itemId);
-            await rundownApi.reorderRundown(rundown.id, items.map((i) => i.id));
-          }
-          set({ rundown: { ...rundown, items } });
+          const next = { ...rundown, items };
+          if (get().demo) { commitDemo(next); return; }
+          await rundownApi.deleteRundownItem(itemId);
+          await rundownApi.reorderRundown(rundown.id, items.map((i) => i.id));
+          set({ rundown: next });
         }),
 
         uploadMedia: async (files) => {
@@ -375,7 +553,7 @@ export const useStore = create<Store>()(
       };
     },
     {
-      name: 'mesa-central-demo-v2',
+      name: 'mesa-central-demo-v3',
       storage: createJSONStorage(() => localStorage),
       // Solo el modo demo guarda datos en el navegador. Con Supabase la fuente
       // de verdad es la base y la sesión la gestiona supabase-js.
@@ -385,6 +563,8 @@ export const useStore = create<Store>()(
               currentUser: s.currentUser,
               notes: s.notes,
               rundown: s.rundown,
+              demoRundowns: s.demoRundowns,
+              selectedRundownId: s.selectedRundownId,
               // Las URLs blob: no sobreviven a una recarga.
               media: s.media.filter((m) => !m.url.startsWith('blob:')),
             }

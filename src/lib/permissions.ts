@@ -1,7 +1,7 @@
 // Reglas de permisos del lado cliente. Reflejan las políticas RLS y los
 // triggers de supabase/schema.sql: la UI las usa para mostrar u ocultar
 // acciones, y el modo demo para aplicarlas. La seguridad real está en la base.
-import type { MediaItem, Note, User } from '../types';
+import type { MediaItem, Note, Rundown, User } from '../types';
 
 export const isEditorRole = (u: User | null) => u?.role === 'editor' || u?.role === 'director';
 
@@ -32,6 +32,15 @@ export const canManageRundown = (u: User | null) => isEditorRole(u);
 
 export const canChangeRundownStatus = (u: User | null) =>
   isEditorRole(u) || u?.role === 'presentador';
+
+type RundownLike = Pick<Rundown, 'status'> | null | undefined;
+
+/** Crear/editar/reordenar/quitar segmentos y editar datos: solo en un rundown activo. */
+export const canEditRundown = (u: User | null, r: RundownLike) =>
+  canManageRundown(u) && r?.status === 'activo';
+
+export const canChangeSegmentStatus = (u: User | null, r: RundownLike) =>
+  canChangeRundownStatus(u) && r?.status === 'activo';
 
 export const canUploadMedia = (u: User | null) => canCreateNote(u);
 

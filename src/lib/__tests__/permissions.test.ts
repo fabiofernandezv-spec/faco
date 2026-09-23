@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Note, User } from '../../types';
 import {
   canDeleteMedia, canDeleteNote, canEditNote, canManageRundown, canManageUsers,
-  canReviewNotes, canSubmitNote, canChangeRundownStatus, canCreateNote,
+  canReviewNotes, canSubmitNote, canChangeRundownStatus, canCreateNote, canEditRundown,
+  canChangeSegmentStatus,
 } from '../permissions';
 import { transitionNote } from '../noteWorkflow';
 
@@ -69,6 +70,28 @@ describe('permisos de rundown, medios y equipo', () => {
   it('solo el director gestiona el equipo', () => {
     expect(canManageUsers(editor)).toBe(false);
     expect(canManageUsers(director)).toBe(true);
+  });
+});
+
+describe('permisos por estado del rundown', () => {
+  const activo = { status: 'activo' as const };
+  const archivado = { status: 'archivado' as const };
+
+  it('canEditRundown: editor/director solo en activo', () => {
+    expect(canEditRundown(editor, activo)).toBe(true);
+    expect(canEditRundown(director, activo)).toBe(true);
+    expect(canEditRundown(redactor, activo)).toBe(false);
+    expect(canEditRundown(presentador, activo)).toBe(false);
+    expect(canEditRundown(editor, archivado)).toBe(false);
+    expect(canEditRundown(director, archivado)).toBe(false);
+    expect(canEditRundown(editor, null)).toBe(false);
+  });
+
+  it('canChangeSegmentStatus: presentador y editores solo en activo', () => {
+    expect(canChangeSegmentStatus(presentador, activo)).toBe(true);
+    expect(canChangeSegmentStatus(editor, activo)).toBe(true);
+    expect(canChangeSegmentStatus(redactor, activo)).toBe(false);
+    expect(canChangeSegmentStatus(presentador, archivado)).toBe(false);
   });
 });
 

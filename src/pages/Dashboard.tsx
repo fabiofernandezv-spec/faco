@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { FileText, CheckSquare, Radio, TrendingUp, Clock, Plus } from 'lucide-react';
 import { useStore, useCurrentUser } from '../store/useStore';
+import { computeSchedule, describeDiff, formatClock, formatDuration } from '../lib/rundownTiming';
 import { StatusBadge } from '../components/StatusBadge';
 
 function StatCard({ label, value, sub, color }: { label: string; value: number; sub: string; color: string }) {
@@ -17,7 +18,7 @@ export function Dashboard() {
   const { notes, rundown } = useStore();
   const currentUser = useCurrentUser();
   const rundownItems = rundown?.items ?? [];
-  const rundownMins = Math.floor(rundownItems.reduce((a, i) => a + i.durationSecs, 0) / 60);
+  const schedule = rundown ? computeSchedule(rundown.items, rundown.airTime, rundown.plannedDurationSecs) : null;
 
   const borradores  = notes.filter((n) => n.status === 'borrador').length;
   const enRevision  = notes.filter((n) => n.status === 'en_revision').length;
@@ -132,7 +133,12 @@ export function Dashboard() {
             </div>
             <p className="text-sm text-gray-700 font-medium">{rundown?.title ?? 'Sin rundown activo'}</p>
             <p className="text-xs text-gray-400 mt-0.5">{rundown ? `${rundown.channel} · ${rundown.date}` : '—'}</p>
-            <p className="text-xs text-gray-500 mt-2">{rundownItems.length} segmentos · {rundownMins} min totales</p>
+            <p className="text-xs text-gray-500 mt-2">{rundownItems.length} segmentos · {formatDuration(schedule?.totalSecs ?? 0)} totales</p>
+            {schedule && (
+              <p className="text-xs text-gray-500 mt-0.5">
+                Fin estimado {schedule.endSecs === null ? '—' : formatClock(schedule.endSecs)} · {describeDiff(schedule.diffSecs).label}
+              </p>
+            )}
             <Link to="/rundown" className="mt-3 text-xs font-medium text-brand-600 hover:underline block">
               Ver escaleta →
             </Link>

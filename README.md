@@ -18,6 +18,9 @@ npm run dev
 | `npm test`          | Tests (Vitest)                        |
 | `npm run build`     | Build de producción en `dist/`        |
 
+Las reglas de la base (RLS, triggers) tienen pruebas SQL en `supabase/tests/`
+(ver su README); el CI las ejecuta contra PostgreSQL 16 en cada push.
+
 **Modo demo:** sin `VITE_SUPABASE_*` la app usa datos de ejemplo guardados en
 el navegador y un selector de usuario. No usar en producción.
 
@@ -67,7 +70,12 @@ Para actualizar Spec Kit:
   Autor, `approved_*` y `rejected_*` los fija la base, no el navegador.
 - Historial de cambios de estado en `note_events`.
 - Edición concurrente: si otra persona guardó antes, se avisa en vez de pisar.
-- Presentadores solo cambian el estado de los segmentos del rundown.
+- Rundown: editores y directores arman la escaleta (apertura, notas, pausas,
+  cortinas, cierre) con duración, presentador y observaciones; presentadores
+  solo cambian el estado; redactores solo consultan. Un único segmento al aire
+  (el anterior pasa a emitido de forma atómica). Rundowns archivados de solo
+  lectura, con reactivación. Las horas de inicio, el fin estimado y el desfase
+  se calculan a partir de la hora de salida y la duración planificada.
 - Medios en bucket **privado** `media` (máx. 100 MB, tipos permitidos),
   mostrados con URLs firmadas de 1 hora.
 - HTML de las notas saneado con DOMPurify al guardar y al mostrar.
