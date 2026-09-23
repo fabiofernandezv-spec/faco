@@ -21,6 +21,24 @@ npm run dev
 **Modo demo:** sin `VITE_SUPABASE_*` la app usa datos de ejemplo guardados en
 el navegador y un selector de usuario. No usar en producción.
 
+## Desarrollo guiado por especificaciones (Spec Kit)
+
+El proyecto usa [Spec Kit](https://github.com/github/spec-kit) con Claude Code.
+Los principios del proyecto están en `.specify/memory/constitution.md` y cada
+funcionalidad nueva sigue este flujo (comandos dentro de Claude Code):
+
+| Paso | Comando                | Resultado                                   |
+|------|------------------------|---------------------------------------------|
+| 1    | `/speckit-specify …`   | `specs/NNN-nombre/spec.md` (qué y por qué)  |
+| 2    | `/speckit-clarify`     | Opcional: resuelve ambigüedades             |
+| 3    | `/speckit-plan …`      | `plan.md`, modelo de datos, contratos       |
+| 4    | `/speckit-tasks`       | `tasks.md` con tareas ordenadas             |
+| 5    | `/speckit-analyze`     | Opcional: consistencia entre documentos     |
+| 6    | `/speckit-implement`   | Implementa las tareas                       |
+
+Para actualizar Spec Kit:
+`uvx --from git+https://github.com/github/spec-kit.git specify init --here --force --integration claude`
+
 ## Configurar Supabase
 
 1. Crea un proyecto en Supabase.
